@@ -4,6 +4,7 @@
  * Run with `pnpm e2e:tunnel`. Needs network access and cloudflared.
  */
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
+import { Room } from '../src/room.ts'
 import { startRoomServer } from '../src/server.ts'
 import { RoomStore } from '../src/store.ts'
 import { startQuickTunnel, waitUntilReachable } from '../src/tunnel.ts'
@@ -38,7 +39,7 @@ function check(label: string, ok: boolean, detail = ''): void {
 const store = new RoomStore(':memory:')
 const hostToken = store.addMember('Host', 'host').token
 const remoteToken = store.addMember('Remote', 'member').token
-const server = await startRoomServer({ store, roomName: 'e2e', port: 0 })
+const server = await startRoomServer({ room: new Room(store, 'e2e'), port: 0 })
 const tunnel = await startQuickTunnel(server.port)
 
 try {

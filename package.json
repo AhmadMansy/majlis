@@ -16,7 +16,8 @@
     "lint": "biome check .",
     "format": "biome check --write .",
     "test": "vitest run",
-    "e2e:tunnel": "node scripts/e2e-tunnel.ts"
+    "e2e:tunnel": "node scripts/e2e-tunnel.ts",
+    "sample:report": "node scripts/sample-report.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/node": "2.1.2",
@@ -27,6 +28,7 @@
     "@biomejs/biome": "2.6.6",
     "@modelcontextprotocol/client": "2.4.0",
     "@types/node": "^24.19.2",
+    "playwright": "1.65.0",
     "typescript": "7.0.2",
     "vitest": "5.1.0"
   }

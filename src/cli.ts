@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { homedir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
+import { Room } from './room.ts'
 import { startRoomServer } from './server.ts'
 import { RoomStore } from './store.ts'
 import { startQuickTunnel, type Tunnel, waitUntilReachable } from './tunnel.ts'
@@ -71,7 +72,8 @@ async function host(argv: string[]): Promise<void> {
   const statePath = join(dir, 'state.json')
 
   const issued: Array<{ name: string; token: string; local: boolean }> = []
-  if (!store.memberByName(values.name)) {
+  if (!store.hostMember()) {
+    if (store.nameTaken(values.name)) throw new Error(`The name "${values.name}" is already used.`)
     issued.push({
       name: values.name,
       token: store.addMember(values.name, 'host').token,
@@ -79,7 +81,7 @@ async function host(argv: string[]): Promise<void> {
     })
   }
   for (const name of values.invite) {
-    if (store.memberByName(name)) {
+    if (store.nameTaken(name)) {
       console.log(
         `"${name}" is already a member; use \`majlis invite ${name} --rotate\` for a new token.`,
       )
@@ -88,7 +90,8 @@ async function host(argv: string[]): Promise<void> {
     }
   }
 
-  const server = await startRoomServer({ store, roomName: values.room, port })
+  const room = new Room(store, values.room)
+  const server = await startRoomServer({ room, port })
   const localUrl = `http://127.0.0.1:${server.port}`
   console.log(`Room "${values.room}" is open at ${localUrl}/mcp  (data: ${dir})`)
 
@@ -96,6 +99,7 @@ async function host(argv: string[]): Promise<void> {
   if (!values['no-tunnel']) {
     console.log('Opening Cloudflare quick tunnel...')
     tunnel = await startQuickTunnel(server.port)
+    room.urls.public = tunnel.url
     const reachable = await waitUntilReachable(tunnel.url)
     console.log(
       reachable
@@ -155,6 +159,9 @@ function invite(argv: string[]): void {
   try {
     const existing = store.memberByName(name)
     let token: string | undefined
+    if (!existing && store.nameTaken(name)) {
+      throw new Error(`"${name}" was removed from this room; invite them under another name.`)
+    }
     if (existing && !values.rotate) {
       throw new Error(`"${name}" is already a member. Add --rotate to replace their token.`)
     }
