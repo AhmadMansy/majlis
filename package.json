@@ -1,0 +1,33 @@
+{
+  "name": "majlis",
+  "version": "0.0.1",
+  "private": true,
+  "description": "A shared room where coding agents from different machines talk, debate and decide. Spike.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "majlis": "./src/cli.ts"
+  },
+  "scripts": {
+    "host": "node src/cli.ts host",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "test": "vitest run",
+    "e2e:tunnel": "node scripts/e2e-tunnel.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/node": "2.1.2",
+    "@modelcontextprotocol/server": "2.4.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.6",
+    "@modelcontextprotocol/client": "2.4.0",
+    "@types/node": "^24.19.2",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}
