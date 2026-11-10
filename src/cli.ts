@@ -3,6 +3,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { homedir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
+import { startAdminServer } from './admin.ts'
+import { connectHelp } from './connect.ts'
 import { Room } from './room.ts'
 import { startRoomServer } from './server.ts'
 import { RoomStore } from './store.ts'
@@ -17,39 +19,16 @@ interface RoomState {
 
 const USAGE = `majlis - a shared room where coding agents talk
 
-  majlis host   [--room <name>] [--name <you>] [--port 8787] [--no-tunnel] [--invite <name>]...
+  majlis host   [--room <name>] [--name <you>] [--port 8787] [--panel-port <n>] [--no-tunnel] [--invite <name>]...
   majlis invite <name> [--room <name>] [--rotate]
 
-host    Start the room on this machine and open a Cloudflare quick tunnel to it.
+host    Start the room on this machine, open a Cloudflare quick tunnel to it, and serve the
+        control panel on a second local port (default: the room port + 1).
 invite  Create a token for someone (or --rotate an existing member's token) and print how to connect.
 `
 
 const dataDir = (room: string): string =>
   process.env.MAJLIS_HOME ? join(process.env.MAJLIS_HOME, room) : join(homedir(), '.majlis', room)
-
-function connectHelp(name: string, url: string, token: string): string {
-  const endpoint = `${url}/mcp`
-  const config = JSON.stringify(
-    {
-      mcpServers: {
-        majlis: { type: 'http', url: endpoint, headers: { Authorization: `Bearer ${token}` } },
-      },
-    },
-    null,
-    2,
-  )
-  return [
-    `== ${name} ==`,
-    'Claude Code:',
-    `  claude mcp add --transport http majlis ${endpoint} --header "Authorization: Bearer ${token}"`,
-    'Other MCP clients (config file):',
-    config
-      .split('\n')
-      .map((line) => `  ${line}`)
-      .join('\n'),
-    '',
-  ].join('\n')
-}
 
 async function host(argv: string[]): Promise<void> {
   const { values } = parseArgs({
@@ -58,6 +37,7 @@ async function host(argv: string[]): Promise<void> {
       room: { type: 'string', default: 'default' },
       name: { type: 'string', default: userInfo().username },
       port: { type: 'string', default: '8787' },
+      'panel-port': { type: 'string' },
       'no-tunnel': { type: 'boolean', default: false },
       invite: { type: 'string', multiple: true, default: [] },
     },
@@ -123,12 +103,17 @@ async function host(argv: string[]): Promise<void> {
       console.log(connectHelp(name, local ? localUrl : (tunnel?.url ?? localUrl), token))
     }
   }
+  const panelPort =
+    values['panel-port'] === undefined ? server.port + 1 : Number(values['panel-port'])
+  const admin = await startAdminServer({ room, port: panelPort })
+  console.log(`Control panel (this machine only, do not share this link):\n  ${admin.url}\n`)
   console.log('Press Ctrl+C to close the room.')
 
   const shutdown = async () => {
     console.log('\nClosing room...')
     tunnel?.stop()
     rmSync(statePath, { force: true })
+    await admin.close()
     await server.close()
     store.close()
     process.exit(0)

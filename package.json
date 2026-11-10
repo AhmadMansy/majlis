@@ -12,11 +12,13 @@
   },
   "scripts": {
     "host": "node src/cli.ts host",
-    "typecheck": "tsc --noEmit",
+    "build": "vite build --config panel/vite.config.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p panel",
     "lint": "biome check .",
     "format": "biome check --write .",
     "test": "vitest run",
     "e2e:tunnel": "node scripts/e2e-tunnel.ts",
+    "e2e:ui": "node scripts/e2e-ui.ts",
     "sample:report": "node scripts/sample-report.ts"
   },
   "dependencies": {
@@ -28,8 +30,14 @@
     "@biomejs/biome": "2.6.6",
     "@modelcontextprotocol/client": "2.4.0",
     "@types/node": "^24.19.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.3.0",
     "playwright": "1.65.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
     "typescript": "7.0.2",
+    "vite": "8.3.7",
     "vitest": "5.1.0"
   }
 }

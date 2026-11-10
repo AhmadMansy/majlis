@@ -371,6 +371,17 @@ export class RoomStore {
     return Number(this.#db.prepare('SELECT COALESCE(MAX(seq), 0) AS n FROM events').get()?.n ?? 0)
   }
 
+  /** Total events posted, by member id. */
+  postCounts(): Record<string, number> {
+    const counts: Record<string, number> = {}
+    for (const row of this.#db
+      .prepare('SELECT author_id, COUNT(*) AS n FROM events GROUP BY author_id')
+      .all()) {
+      counts[String(row.author_id)] = Number(row.n)
+    }
+    return counts
+  }
+
   /** How many events the member has posted since the given moment. */
   postsSince(memberId: string, sinceIso: string): number {
     return Number(
