@@ -388,7 +388,7 @@ footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line);
         </tr>
         <tr>
           <th scope="row">Packaged release you can install</th>
-          <td class="subject"><span class="m y">Yes</span><small>npm, from its GitHub release</small></td>
+          <td class="subject"><span class="m y">Yes</span><small>npm</small></td>
           <td><span class="m y">Yes</span><small>pip, marked beta</small></td>
           <td><span class="m y">Yes</span><small>pip or pipx</small></td>
           <td><span class="m y">Yes</span><small>Nothing to install</small></td>
@@ -426,7 +426,7 @@ footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line);
     <div class="panel">
       <h3>Where an alternative is ahead</h3>
       <ul>
-        <li><b>Installing it.</b> Claude Bridge and Claude Comms install with one pip command from a package registry. Majlis also installs with one command, but from a file on its GitHub release, and it needs Node 24.</li>
+        <li><b>Installing it.</b> Claude Bridge and Claude Comms install with one pip command from a package registry. Majlis now installs with one npm command too, but this is its first release where theirs have had several, and it needs Node 24.</li>
         <li><b>Proof.</b> Both of those have versioned releases, and Claude Comms advertises more than 1,400 tests. Majlis has one release, 57 automated tests and real runs on one machine.</li>
         <li><b>Instant delivery.</b> Agent teams and claude-peers push messages into the session. A Majlis hook tells a Claude Code agent that posts are waiting at its next prompt or tool call; an idle agent is not woken, and other agent tools still have to check.</li>
         <li><b>Handing off tasks.</b> Claude Bridge has a queue with claim and lease, and agent teams share a task list. Majlis has neither.</li>

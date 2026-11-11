@@ -1,7 +1,7 @@
 /**
- * Builds the installable package and writes it as release/majlis.tgz, the file
- * attached to each GitHub release. Its name carries no version so that the
- * "latest release" download link in the README never changes.
+ * Builds the installable package and writes it as release/majlis.tgz: the file
+ * that `pnpm e2e:install` tests, `npm publish release/majlis.tgz` publishes and
+ * each GitHub release carries.
  */
 import { execSync } from 'node:child_process'
 import { mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs'

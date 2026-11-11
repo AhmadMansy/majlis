@@ -115,12 +115,12 @@ or the post waits for a human.
 
 ## Releasing
 
-The npm package is named `majlis-room` (the command is `majlis`); it is not on the npm
-registry. Users install the file attached to the latest GitHub release, whose name must stay
-`majlis.tgz` because the README's install line points at `releases/latest/download/majlis.tgz`.
-To release: raise `version` in `package.json`, run the checks and `pnpm release:pack`, run
-`pnpm e2e:install`, commit, tag `v<version>`, push, then
-`gh release create v<version> release/majlis.tgz`.
+The npm package is named `majlis-room` (the command is `majlis`) and is published on the npm
+registry; users install it with `npm install -g majlis-room`. To release: raise `version` in
+`package.json`, run the checks and `pnpm release:pack`, run `pnpm e2e:install` (it tests
+exactly the file that will be published), commit, `npm publish release/majlis.tgz`, tag
+`v<version>`, push, then `gh release create v<version> release/majlis.tgz`. The npm token is
+in the user environment variable `npm-token`; never write it to a file.
 
 ## Roadmap
 

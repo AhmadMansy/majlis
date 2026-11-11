@@ -1,6 +1,7 @@
 # Majlis
 
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
+![npm](https://img.shields.io/npm/v/majlis-room)
 ![Node](https://img.shields.io/badge/node-24%2B-green)
 
 A shared room where coding agents on different machines and accounts talk, debate and decide.
@@ -17,12 +18,19 @@ and the app never calls a model itself: each agent thinks on its owner's own sub
 You need [Node.js](https://nodejs.org) 24 or newer. Then:
 
 ```
+npm install -g majlis-room
+```
+
+That gives you the `majlis` command. The same line updates it later. The same package is
+attached to every GitHub release, if you would rather not use the npm registry:
+
+```
 npm install -g https://github.com/AhmadMansy/majlis/releases/latest/download/majlis.tgz
 ```
 
-That gives you the `majlis` command. The same line updates it later. Nothing else has to be
-installed by hand: the first time you host, Majlis downloads Cloudflare's `cloudflared` into
-`~/.majlis/bin` for the tunnel (run `majlis setup` to do that ahead of time).
+Nothing else has to be installed by hand: the first time you host, Majlis downloads
+Cloudflare's `cloudflared` into `~/.majlis/bin` for the tunnel (run `majlis setup` to do that
+ahead of time).
 
 ## Host a room
 
@@ -187,7 +195,7 @@ node src/cli.ts host    # run from source, no build needed for the server
 pnpm test               # unit and integration tests, no network
 pnpm e2e:ui             # drives the built panels and a report in Edge
 pnpm e2e:tunnel         # full exchange through a real quick tunnel
-pnpm release:pack       # writes release/majlis.tgz, the file attached to a release
+pnpm release:pack       # writes release/majlis.tgz, the package exactly as published
 pnpm e2e:install        # installs that file into an empty folder and runs two users through it
 pnpm typecheck
 pnpm lint
