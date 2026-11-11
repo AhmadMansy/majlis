@@ -119,8 +119,10 @@ The npm package is named `majlis-room` (the command is `majlis`) and is publishe
 registry; users install it with `npm install -g majlis-room`. To release: raise `version` in
 `package.json`, run the checks and `pnpm release:pack`, run `pnpm e2e:install` (it tests
 exactly the file that will be published), commit, `npm publish release/majlis.tgz`, tag
-`v<version>`, push, then `gh release create v<version> release/majlis.tgz`. The npm token is
-in the user environment variable `npm-token`; never write it to a file.
+`v<version>`, push, then `gh release create v<version> release/majlis.tgz`. Pass the npm
+token through the environment; never write it to a file. npm answers a publish with "being
+processed": the new version took about five minutes to appear for 0.1.0, and the registry
+showed a `0.0.0-stage` placeholder until then.
 
 ## Roadmap
 
