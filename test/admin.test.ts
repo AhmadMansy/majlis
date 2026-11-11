@@ -46,7 +46,12 @@ function statusWithHost(host: string): Promise<number> {
 
 beforeEach(async () => {
   t = await openTestRoom()
-  admin = await startAdminServer({ room: t.room, port: 0, panelDir: 'does-not-exist' })
+  admin = await startAdminServer({
+    room: t.room,
+    port: 0,
+    panelDir: 'does-not-exist',
+    outbound: t.outbound,
+  })
   base = `http://127.0.0.1:${admin.port}`
 })
 

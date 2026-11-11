@@ -112,6 +112,58 @@ export const DEFAULT_SETTINGS: Settings = {
   maxRounds: 4,
 }
 
+/** When this machine's own agent must wait for its human before a post leaves the machine. */
+export type ApprovalMode = 'every' | 'debate' | 'auto'
+
+/** Settings that belong to this machine and are never synced to anyone else. */
+export interface LocalSettings {
+  approval: ApprovalMode
+  /** Text that must never leave this machine: plain substrings, or patterns with `*`. */
+  deny: string[]
+  /** Debates the human has already approved posting in, for the `debate` mode. */
+  approvedDebates: number[]
+}
+
+export const DEFAULT_LOCAL_SETTINGS: LocalSettings = {
+  approval: 'every',
+  deny: [],
+  approvedDebates: [],
+}
+
+/** How a member's copy reaches the room it mirrors. Holds the member's secret token. */
+export interface MirrorConfig {
+  hostUrl: string
+  token: string
+  meId: string
+  /** The room's name as the host calls it. */
+  room: string
+}
+
+export type OutboxStatus = 'awaiting_approval' | 'queued' | 'sent' | 'failed' | 'rejected'
+
+/** One post by this machine's agent or human, on its way to the room. */
+export interface OutboxItem {
+  id: string
+  action: string
+  input: Record<string, unknown>
+  status: OutboxStatus
+  /** What the room answered, or why it failed. */
+  result: string
+  human: boolean
+  debateId: number | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** A member as sent to copies: includes removed members, whose names old messages still need. */
+export interface MemberRecord {
+  id: string
+  name: string
+  role: Role
+  active: boolean
+  createdAt: string
+}
+
 interface Waiter {
   memberId: string
   wake: () => void
@@ -189,6 +241,24 @@ export class RoomStore {
         updated_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS outbox (
+        id TEXT PRIMARY KEY,
+        action TEXT NOT NULL,
+        input TEXT NOT NULL,
+        status TEXT NOT NULL,
+        result TEXT NOT NULL DEFAULT '',
+        human INTEGER NOT NULL DEFAULT 0,
+        debate_id INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS acts (
+        id TEXT PRIMARY KEY,
+        member_id TEXT NOT NULL,
+        ok INTEGER NOT NULL,
+        text TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
     `)
     this.#migrate()
   }
@@ -464,6 +534,12 @@ export class RoomStore {
     })
   }
 
+  /** Resolves `true` as soon as anyone posts, or `false` on timeout or abort. */
+  waitForEvent(timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
+    // No member has an empty id, so this waiter is woken by every author.
+    return this.waitForOthers('', timeoutMs, signal)
+  }
+
   // ── Debates ────────────────────────────────────────────────────────────
 
   createDebate(input: {
@@ -573,6 +649,322 @@ export class RoomStore {
     this.#db
       .prepare('UPDATE reports SET notes = ?, updated_at = ? WHERE id = ?')
       .run(JSON.stringify(notes), now(), id)
+  }
+
+  /** Reports created or changed after the given moment; all of them for an empty string. */
+  reportsSince(iso: string): StoredReport[] {
+    return this.#db
+      .prepare('SELECT * FROM reports WHERE updated_at > ? ORDER BY id')
+      .all(iso)
+      .map((row) => toReport(row))
+      .filter((r): r is StoredReport => r !== undefined)
+  }
+
+  // ── This machine: kind, local settings, outbox ─────────────────────────
+
+  #value<T>(key: string, fallback: T): T {
+    const row = this.#db.prepare('SELECT value FROM settings WHERE key = ?').get(key)
+    return parseJson<T>(row?.value, fallback)
+  }
+
+  #setValue(key: string, value: unknown): void {
+    this.#db
+      .prepare(
+        'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+      )
+      .run(key, JSON.stringify(value))
+  }
+
+  /** Whether this database is the room itself or a member's copy. Rooms older than copies are hosts. */
+  kind(): 'host' | 'mirror' | 'new' {
+    const kind = this.#value<string>('kind', '')
+    if (kind === 'host' || kind === 'mirror') return kind
+    return this.hostMember() ? 'host' : 'new'
+  }
+
+  setKind(kind: 'host' | 'mirror'): void {
+    this.#setValue('kind', kind)
+  }
+
+  localSettings(): LocalSettings {
+    return { ...DEFAULT_LOCAL_SETTINGS, ...this.#value<Partial<LocalSettings>>('local', {}) }
+  }
+
+  updateLocalSettings(patch: Partial<LocalSettings>): LocalSettings {
+    const next = { ...this.localSettings(), ...patch }
+    this.#setValue('local', next)
+    return next
+  }
+
+  mirrorConfig(): MirrorConfig | undefined {
+    return this.#value<MirrorConfig | undefined>('mirror', undefined)
+  }
+
+  setMirrorConfig(config: MirrorConfig): void {
+    this.#setValue('mirror', config)
+  }
+
+  addOutbox(input: {
+    action: string
+    input: Record<string, unknown>
+    status: OutboxStatus
+    human: boolean
+    debateId: number | null
+  }): OutboxItem {
+    const id = randomUUID()
+    const ts = now()
+    this.#db
+      .prepare(
+        `INSERT INTO outbox (id, action, input, status, human, debate_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        input.action,
+        JSON.stringify(input.input),
+        input.status,
+        input.human ? 1 : 0,
+        input.debateId,
+        ts,
+        ts,
+      )
+    return this.outboxItem(id) as OutboxItem
+  }
+
+  outboxItem(id: string): OutboxItem | undefined {
+    const row = this.#db.prepare('SELECT * FROM outbox WHERE id = ?').get(id)
+    return row ? toOutbox(row) : undefined
+  }
+
+  setOutbox(id: string, status: OutboxStatus, result: string): OutboxItem | undefined {
+    this.#db
+      .prepare('UPDATE outbox SET status = ?, result = ?, updated_at = ? WHERE id = ?')
+      .run(status, result, now(), id)
+    return this.outboxItem(id)
+  }
+
+  /** Unfinished items oldest first, then the most recently finished ones. */
+  outbox(recent = 20): OutboxItem[] {
+    const open = this.#db
+      .prepare(
+        `SELECT * FROM outbox WHERE status IN ('awaiting_approval', 'queued') ORDER BY created_at, rowid`,
+      )
+      .all()
+      .map(toOutbox)
+    const done = this.#db
+      .prepare(
+        `SELECT * FROM outbox WHERE status NOT IN ('awaiting_approval', 'queued')
+         ORDER BY updated_at DESC, rowid DESC LIMIT ?`,
+      )
+      .all(recent)
+      .map(toOutbox)
+    return [...open, ...done]
+  }
+
+  queuedOutbox(): OutboxItem[] {
+    return this.#db
+      .prepare(`SELECT * FROM outbox WHERE status = 'queued' ORDER BY created_at, rowid`)
+      .all()
+      .map(toOutbox)
+  }
+
+  // ── Host side of copies: idempotent posts and what a copy needs ────────
+
+  /** The stored answer to a post a copy already delivered, so a retry never posts twice. */
+  actResult(id: string): { ok: boolean; text: string } | undefined {
+    const row = this.#db.prepare('SELECT ok, text FROM acts WHERE id = ?').get(id)
+    return row ? { ok: Number(row.ok) === 1, text: String(row.text) } : undefined
+  }
+
+  saveAct(id: string, memberId: string, ok: boolean, text: string): void {
+    this.#db
+      .prepare(
+        'INSERT OR REPLACE INTO acts (id, member_id, ok, text, created_at) VALUES (?, ?, ?, ?, ?)',
+      )
+      .run(id, memberId, ok ? 1 : 0, text, now())
+  }
+
+  allMembers(): MemberRecord[] {
+    return this.#db
+      .prepare('SELECT id, name, role, revoked, created_at FROM members ORDER BY created_at')
+      .all()
+      .map((row) => ({
+        id: String(row.id),
+        name: String(row.name),
+        role: (toMember({ ...row, last_seen: null })?.role ?? 'member') as Role,
+        active: Number(row.revoked) === 0,
+        createdAt: String(row.created_at),
+      }))
+  }
+
+  /** A short fingerprint of one event, used to check that a copy and the room share the same history. */
+  eventDigest(seq: number): string | undefined {
+    const row = this.#db
+      .prepare('SELECT ts, author_id, kind, body FROM events WHERE seq = ?')
+      .get(seq)
+    if (!row) return undefined
+    return createHash('sha256')
+      .update(`${seq}|${row.ts}|${row.author_id}|${row.kind}|${row.body}`)
+      .digest('hex')
+      .slice(0, 24)
+  }
+
+  // ── Copy side: applying what the room sent ─────────────────────────────
+
+  /** Makes the copy's member list match the room's. Local tokens and read positions are kept. */
+  applyMembers(members: MemberRecord[]): void {
+    const upsert = this.#db.prepare(
+      `INSERT INTO members (id, name, role, token_hash, revoked, created_at) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET name = excluded.name, role = excluded.role, revoked = excluded.revoked`,
+    )
+    for (const member of members) {
+      // Other members' tokens never leave the host; the placeholder can match no real token.
+      const placeholder = `none:${randomBytes(16).toString('hex')}`
+      upsert.run(
+        member.id,
+        member.name,
+        member.role,
+        placeholder,
+        member.active ? 0 : 1,
+        member.createdAt,
+      )
+    }
+  }
+
+  /** Adds events the copy does not have yet, keeping the room's numbering. Returns how many were new. */
+  applyEvents(events: RoomEvent[]): number {
+    const insert = this.#db.prepare(
+      `INSERT OR IGNORE INTO events (seq, ts, author_id, kind, body, reply_to, debate_id, data)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    let added = 0
+    const authors = new Set<string>()
+    for (const event of events) {
+      const result = insert.run(
+        event.seq,
+        event.ts,
+        event.authorId,
+        event.kind,
+        event.body,
+        event.replyTo,
+        event.debateId,
+        JSON.stringify(event.data),
+      )
+      if (Number(result.changes) > 0) {
+        added += 1
+        authors.add(event.authorId)
+      }
+    }
+    if (added > 0) {
+      for (const waiter of [...this.#waiters]) {
+        if ([...authors].some((author) => author !== waiter.memberId)) waiter.wake()
+      }
+    }
+    return added
+  }
+
+  applyDebates(debates: Debate[]): void {
+    const upsert = this.#db.prepare(
+      `INSERT OR REPLACE INTO debates (id, question, options, context, opened_by, opened_at, status, max_rounds, decision)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    for (const debate of debates) {
+      upsert.run(
+        debate.id,
+        debate.question,
+        JSON.stringify(debate.options),
+        debate.context,
+        debate.openedBy,
+        debate.openedAt,
+        debate.status,
+        debate.maxRounds,
+        debate.decision ? JSON.stringify(debate.decision) : null,
+      )
+    }
+  }
+
+  applyReports(reports: StoredReport[]): void {
+    const upsert = this.#db.prepare(
+      `INSERT OR REPLACE INTO reports (id, key, debate_id, author, content, notes, from_seq, to_seq, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    for (const report of reports) {
+      upsert.run(
+        report.id,
+        report.key,
+        report.debateId,
+        report.author,
+        JSON.stringify(report.content),
+        JSON.stringify(report.notes),
+        report.fromSeq,
+        report.toSeq,
+        report.updatedAt,
+      )
+    }
+  }
+
+  applySettings(settings: Settings): void {
+    this.#setValue('room', settings)
+  }
+
+  /** The newest report change the copy knows of, to ask the room only for later ones. */
+  lastReportUpdate(): string {
+    return String(
+      this.#db.prepare(`SELECT COALESCE(MAX(updated_at), '') AS t FROM reports`).get()?.t ?? '',
+    )
+  }
+
+  /** Empties the copied history when it no longer matches the room, so it can be fetched again. */
+  resetCopy(meId: string): void {
+    this.#db.exec('DELETE FROM events; DELETE FROM debates; DELETE FROM reports;')
+    this.#db.prepare('DELETE FROM members WHERE id != ?').run(meId)
+    this.#db.prepare('UPDATE members SET cursor = 0 WHERE id = ?').run(meId)
+  }
+
+  /** Whether the copy's owner already has a token for their own agent. */
+  hasLocalToken(memberId: string): boolean {
+    const row = this.#db.prepare('SELECT token_hash FROM members WHERE id = ?').get(memberId)
+    return row !== undefined && !String(row.token_hash).startsWith('none:')
+  }
+
+  /** Gives the copy's owner a token for their own agent to reach this machine's copy. */
+  issueLocalToken(memberId: string): string {
+    const token = randomBytes(32).toString('base64url')
+    this.#db
+      .prepare('UPDATE members SET token_hash = ? WHERE id = ?')
+      .run(hashToken(token), memberId)
+    return token
+  }
+
+  /**
+   * Turns a copy into the room itself, for when the original host is gone.
+   * Its owner becomes the host; everyone else needs a new token from them.
+   */
+  promoteCopy(meId: string): void {
+    this.#db.prepare(`UPDATE members SET role = 'member' WHERE role = 'host'`).run()
+    this.#db.prepare(`UPDATE members SET role = 'host', revoked = 0 WHERE id = ?`).run(meId)
+    this.#db
+      .prepare(
+        `UPDATE outbox SET status = 'failed', result = 'Not sent: this copy became the room.', updated_at = ?
+         WHERE status IN ('awaiting_approval', 'queued')`,
+      )
+      .run(now())
+    this.#db.prepare(`DELETE FROM settings WHERE key = 'mirror'`).run()
+    this.setKind('host')
+  }
+}
+
+function toOutbox(row: Row): OutboxItem {
+  return {
+    id: String(row.id),
+    action: String(row.action),
+    input: parseJson<Record<string, unknown>>(row.input, {}),
+    status: String(row.status) as OutboxStatus,
+    result: String(row.result),
+    human: Number(row.human) === 1,
+    debateId: row.debate_id == null ? null : Number(row.debate_id),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
   }
 }
 

@@ -5,10 +5,15 @@ export interface ConnectInfo {
   claude: string
   /** A config block for other MCP clients. */
   config: string
+  /**
+   * The command that joins with the Majlis app instead, keeping a copy of the
+   * room on the member's own machine. Null where that does not apply.
+   */
+  join: string | null
 }
 
-/** How a member connects their agent to the room. Contains the token: show it once, to that member only. */
-export function connectInfo(url: string, token: string): ConnectInfo {
+/** How a member connects to the room. Contains the token: show it once, to that member only. */
+export function connectInfo(url: string, token: string, offerCopy = false): ConnectInfo {
   const endpoint = `${url}/mcp`
   return {
     endpoint,
@@ -22,14 +27,22 @@ export function connectInfo(url: string, token: string): ConnectInfo {
       null,
       2,
     ),
+    join: offerCopy ? `node src/cli.ts join ${url} --token ${token}` : null,
   }
 }
 
 /** The same information as plain text for the terminal. */
-export function connectHelp(name: string, url: string, token: string): string {
-  const info = connectInfo(url, token)
-  return [
-    `== ${name} ==`,
+export function connectHelp(name: string, url: string, token: string, offerCopy = false): string {
+  const info = connectInfo(url, token, offerCopy)
+  const lines = [`== ${name} ==`]
+  if (info.join) {
+    lines.push(
+      'With the Majlis app (keeps a copy on their machine, works while the host is offline):',
+      `  ${info.join}`,
+      'Or directly, with nothing to install:',
+    )
+  }
+  lines.push(
     'Claude Code:',
     `  ${info.claude}`,
     'Other MCP clients (config file):',
@@ -38,5 +51,6 @@ export function connectHelp(name: string, url: string, token: string): string {
       .map((line) => `  ${line}`)
       .join('\n'),
     '',
-  ].join('\n')
+  )
+  return lines.join('\n')
 }

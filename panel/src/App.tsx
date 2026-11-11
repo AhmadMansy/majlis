@@ -170,12 +170,15 @@ function Members({
   lang,
   refresh,
   onInvite,
+  manage,
 }: {
   state: AdminState
   t: Strings
   lang: Lang
   refresh: () => void
   onInvite: (invite: AdminInvite) => void
+  /** Only the host can change roles, issue tokens, remove and invite. */
+  manage: boolean
 }) {
   const [name, setName] = useState('')
   const [role, setRole] = useState<'member' | 'observer'>('member')
@@ -197,12 +200,14 @@ function Members({
             <div className="row-main">
               <b>{member.name}</b>
               <span className="muted">
-                {t.posts(member.posts)} ·{' '}
-                {member.lastSeen ? `${t.lastActive} ${clock(member.lastSeen, lang)}` : t.never}
+                {t.posts(member.posts)}
+                {/* Only the host knows when each member was last active. */}
+                {manage &&
+                  ` · ${member.lastSeen ? `${t.lastActive} ${clock(member.lastSeen, lang)}` : t.never}`}
               </span>
             </div>
-            {member.role === 'host' ? (
-              <span className="pill">{t.host}</span>
+            {member.role === 'host' || !manage ? (
+              <span className="pill">{t[member.role]}</span>
             ) : (
               <select
                 aria-label={member.name}
@@ -215,16 +220,18 @@ function Members({
                 <option value="observer">{t.observer}</option>
               </select>
             )}
-            <button
-              type="button"
-              className="btn small"
-              onClick={() => {
-                void api<AdminInvite>(`/members/${member.id}/rotate`, {}).then(onInvite)
-              }}
-            >
-              {t.newToken}
-            </button>
-            {member.role !== 'host' && (
+            {manage && (
+              <button
+                type="button"
+                className="btn small"
+                onClick={() => {
+                  void api<AdminInvite>(`/members/${member.id}/rotate`, {}).then(onInvite)
+                }}
+              >
+                {t.newToken}
+              </button>
+            )}
+            {manage && member.role !== 'host' && (
               <button
                 type="button"
                 className="btn small danger"
@@ -240,26 +247,28 @@ function Members({
           </li>
         ))}
       </ul>
-      <form className="inline-form" onSubmit={invite}>
-        <input
-          aria-label={t.inviteName}
-          placeholder={t.inviteName}
-          value={name}
-          maxLength={40}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <select
-          aria-label={t.member}
-          value={role}
-          onChange={(e) => setRole(e.target.value as 'member' | 'observer')}
-        >
-          <option value="member">{t.member}</option>
-          <option value="observer">{t.observer}</option>
-        </select>
-        <button type="submit" className="btn primary" disabled={!name.trim()}>
-          {t.invite}
-        </button>
-      </form>
+      {manage && (
+        <form className="inline-form" onSubmit={invite}>
+          <input
+            aria-label={t.inviteName}
+            placeholder={t.inviteName}
+            value={name}
+            maxLength={40}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <select
+            aria-label={t.member}
+            value={role}
+            onChange={(e) => setRole(e.target.value as 'member' | 'observer')}
+          >
+            <option value="member">{t.member}</option>
+            <option value="observer">{t.observer}</option>
+          </select>
+          <button type="submit" className="btn primary" disabled={!name.trim()}>
+            {t.invite}
+          </button>
+        </form>
+      )}
     </Card>
   )
 }
@@ -281,6 +290,16 @@ function InviteDialog({
     <dialog ref={ref} onClose={onClose} className="dialog">
       <h2>{t.inviteTitle(invite.member.name)}</h2>
       <p className="warn">{t.inviteWarning}</p>
+      {invite.connect.join && (
+        <>
+          <div className="code-head">
+            <b>{t.joinCommand}</b>
+            <CopyButton text={invite.connect.join} t={t} />
+          </div>
+          <pre dir="ltr">{invite.connect.join}</pre>
+          <p className="muted option-gap">{t.directOption}</p>
+        </>
+      )}
       <div className="code-head">
         <b>{t.claudeCommand}</b>
         <CopyButton text={invite.connect.claude} t={t} />
@@ -307,11 +326,13 @@ function DebateDetail({
   version,
   t,
   refresh,
+  canDecide,
 }: {
   id: number
   version: number
   t: Strings
   refresh: () => void
+  canDecide: boolean
 }) {
   const [detail, setDetail] = useState<AdminDebate | null>(null)
   const [resolution, setResolution] = useState('')
@@ -387,7 +408,7 @@ function DebateDetail({
           </div>
           <pre dir="auto">{record}</pre>
         </>
-      ) : (
+      ) : !canDecide ? null : (
         <form className="stack" onSubmit={decide}>
           <h3>{t.recordDecision}</h3>
           <label>
@@ -422,6 +443,7 @@ function DebateDetail({
 }
 
 function Debates({ state, t, refresh }: { state: AdminState; t: Strings; refresh: () => void }) {
+  const canDecide = state.mode === 'host'
   const [open, setOpen] = useState<number | null>(null)
   return (
     <Card title={t.debates}>
@@ -444,7 +466,13 @@ function Debates({ state, t, refresh }: { state: AdminState; t: Strings; refresh
               </span>
             </button>
             {open === debate.id && (
-              <DebateDetail id={debate.id} version={state.lastSeq} t={t} refresh={refresh} />
+              <DebateDetail
+                id={debate.id}
+                version={state.lastSeq}
+                t={t}
+                refresh={refresh}
+                canDecide={canDecide}
+              />
             )}
           </li>
         ))}
@@ -567,6 +595,233 @@ function Rules({
 
 // ── App ────────────────────────────────────────────────────────────────────
 
+function previewValue(value: unknown): string {
+  const text =
+    typeof value === 'string' || typeof value === 'number'
+      ? String(value)
+      : Array.isArray(value) && value.every((item) => typeof item === 'string')
+        ? value.map((item) => `• ${item}`).join('\n')
+        : JSON.stringify(value, null, 2)
+  return text.length > 1500 ? `${text.slice(0, 1500)}…` : text
+}
+
+/** What the agent is about to post, field by field, so the human approves the real content. */
+function InputPreview({ input }: { input: Record<string, unknown> }) {
+  return (
+    <dl className="preview">
+      {Object.entries(input).map(([key, value]) => (
+        <div key={key}>
+          <dt>{key.replaceAll('_', ' ')}</dt>
+          <dd dir="auto">{previewValue(value)}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+function Approvals({
+  state,
+  t,
+  onChanged,
+}: {
+  state: AdminState
+  t: Strings
+  onChanged: (next: AdminState) => void
+}) {
+  const [busy, setBusy] = useState<string | null>(null)
+  const waiting = state.outbox.filter((item) => item.status === 'awaiting_approval')
+  const rest = state.outbox.filter((item) => item.status !== 'awaiting_approval')
+  const decide = (id: string, verdict: 'approve' | 'reject') => {
+    setBusy(id)
+    api<AdminState>(`/outbox/${id}/${verdict}`, {})
+      .then(onChanged)
+      .finally(() => setBusy(null))
+  }
+  const name = (action: string) => t.actionNames[action] ?? action
+  return (
+    <section className={`card${waiting.length > 0 ? ' attention' : ''}`}>
+      <header className="card-head">
+        <h2>{waiting.length > 0 ? `${t.approvals} (${waiting.length})` : t.outbox}</h2>
+      </header>
+      {waiting.length > 0 && <p className="muted">{t.approvalsHint}</p>}
+      {waiting.map((item) => (
+        <article key={item.id} className="held">
+          <b>
+            {name(item.action)}
+            {item.debateId !== null ? ` · #${item.debateId}` : ''}
+          </b>
+          <InputPreview input={item.input} />
+          <div className="held-actions">
+            <button
+              type="button"
+              className="btn primary"
+              disabled={busy === item.id}
+              onClick={() => decide(item.id, 'approve')}
+            >
+              {t.approve}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={busy === item.id}
+              onClick={() => decide(item.id, 'reject')}
+            >
+              {t.decline}
+            </button>
+          </div>
+        </article>
+      ))}
+      {state.outbox.length === 0 && <p className="muted">{t.noOutbox}</p>}
+      {rest.length > 0 && (
+        <ul className="rows compact">
+          {rest.map((item) => (
+            <li key={item.id}>
+              <span className={`pill ob-${item.status}`}>{t.outboxStatus[item.status]}</span>
+              <div className="row-main">
+                <span>{name(item.action)}</span>
+                {item.result && (
+                  <span className="muted clip" dir="auto">
+                    {item.result.split('\n')[0]}
+                  </span>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+function MyAgent({
+  state,
+  t,
+  onChanged,
+  onToken,
+}: {
+  state: AdminState
+  t: Strings
+  onChanged: (next: AdminState) => void
+  onToken: (invite: AdminInvite) => void
+}) {
+  const [deny, setDeny] = useState(state.local.deny.join('\n'))
+  const [saved, setSaved] = useState(false)
+  const save = (patch: { approval?: string; deny?: string[] }) => {
+    void api<AdminState>('/local', patch).then((next) => {
+      onChanged(next)
+      setDeny(next.local.deny.join('\n'))
+      setSaved(true)
+      setTimeout(() => setSaved(false), 1500)
+    })
+  }
+  const lines = deny
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+  const changed = lines.join('\n') !== state.local.deny.join('\n')
+  return (
+    <Card
+      title={t.myAgent}
+      aside={saved ? <span className="pill st-decided">{t.saved}</span> : undefined}
+    >
+      <label className="field">
+        <span>{t.approvalMode}</span>
+        <select value={state.local.approval} onChange={(e) => save({ approval: e.target.value })}>
+          <option value="every">{t.approvalModes.every}</option>
+          <option value="debate">{t.approvalModes.debate}</option>
+          <option value="auto">{t.approvalModes.auto}</option>
+        </select>
+      </label>
+      <div className="stack block-field">
+        <label htmlFor="deny">{t.denyList}</label>
+        <textarea
+          id="deny"
+          dir="ltr"
+          rows={3}
+          value={deny}
+          placeholder={'.env\nsecrets/*\ninternal-billing'}
+          onChange={(e) => setDeny(e.target.value)}
+        />
+        <p className="muted">{t.denyHint}</p>
+        {changed && (
+          <button type="button" className="btn primary" onClick={() => save({ deny: lines })}>
+            {t.save}
+          </button>
+        )}
+      </div>
+      {state.mode === 'mirror' && (
+        <div className="address block-field">
+          <span className="muted">{t.connectAgent}</span>
+          <code dir="ltr">{state.room.local}/mcp</code>
+          <button
+            type="button"
+            className="btn small"
+            onClick={() => {
+              void api<AdminInvite>('/me/token', {}).then(onToken)
+            }}
+          >
+            {t.newLocalToken}
+          </button>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function Connection({
+  state,
+  t,
+  lang,
+  onChanged,
+}: {
+  state: AdminState
+  t: Strings
+  lang: Lang
+  onChanged: (next: AdminState) => void
+}) {
+  const sync = state.sync
+  const [url, setUrl] = useState(sync?.hostUrl ?? '')
+  if (!sync) return null
+  const submit = (event: FormEvent) => {
+    event.preventDefault()
+    void api<AdminState>('/host-address', { url }).then((next) => {
+      onChanged(next)
+      setUrl(next.sync?.hostUrl ?? url)
+    })
+  }
+  return (
+    <Card
+      title={t.connection}
+      aside={
+        <span className={`pill ${sync.online ? 'st-decided' : 'st-escalated'}`}>
+          {sync.online ? t.online : t.offline}
+        </span>
+      }
+    >
+      <p className="muted">
+        {sync.lastSyncAt ? `${t.lastSync} ${clock(sync.lastSyncAt, lang)}` : t.never}
+        {!sync.online && sync.error ? ` · ${sync.error}` : ''}
+      </p>
+      <form className="stack block-field" onSubmit={submit}>
+        <label htmlFor="host-address">{t.hostAddress}</label>
+        <div className="composer-row">
+          <input
+            id="host-address"
+            dir="ltr"
+            className="grow"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+          <button type="submit" className="btn" disabled={url.trim() === sync.hostUrl}>
+            {t.save}
+          </button>
+        </div>
+        <p className="muted">{t.hostAddressHint}</p>
+      </form>
+    </Card>
+  )
+}
+
 export function App() {
   const [lang, setLang] = useState<Lang>(initialLang)
   const [state, setState] = useState<AdminState | null>(null)
@@ -614,6 +869,13 @@ export function App() {
     return () => window.removeEventListener('unhandledrejection', onRejection)
   }, [])
 
+  // A waiting approval holds the agent's call open, so make it visible on a background tab too.
+  const waitingCount =
+    state?.outbox.filter((item) => item.status === 'awaiting_approval').length ?? 0
+  useEffect(() => {
+    document.title = waitingCount > 0 ? `(${waitingCount}) ${t.title}` : t.title
+  }, [waitingCount, t.title])
+
   if (!hasKey) return <p className="fullpage">{t.noKey}</p>
   if (!state) return <p className="fullpage">{error ? t.lost : '…'}</p>
 
@@ -621,8 +883,10 @@ export function App() {
     const index = state.members.findIndex((member) => member.name === name)
     return index >= 0 && index < SLOTS ? index + 1 : 0
   }
-  const hostName = state.members.find((member) => member.role === 'host')?.name ?? ''
+  const isHost = state.mode === 'host'
+  const myName = state.me?.name ?? ''
   const paused = state.settings.paused
+  const offline = state.sync !== null && !state.sync.online
 
   return (
     <div className="app">
@@ -632,23 +896,30 @@ export function App() {
           <div>
             <h1>{t.title}</h1>
             <p className="muted">
-              {t.room}: <b>{state.room.name}</b>
+              {isHost ? t.room : t.yourCopy}: <b>{state.room.name}</b>
             </p>
           </div>
         </div>
         <div className="top-actions">
+          {state.sync && (
+            <span className={`pill ${offline ? 'st-escalated' : 'st-decided'}`}>
+              {offline ? t.offline : t.online}
+            </span>
+          )}
           <span className={`pill ${paused ? 'st-escalated' : 'st-decided'}`}>
             {paused ? t.paused : t.open}
           </span>
-          <button
-            type="button"
-            className={`btn ${paused ? 'primary' : ''}`}
-            onClick={() => {
-              void api<AdminState>('/settings', { paused: !paused }).then(setState)
-            }}
-          >
-            {paused ? t.resume : t.pause}
-          </button>
+          {isHost && (
+            <button
+              type="button"
+              className={`btn ${paused ? 'primary' : ''}`}
+              onClick={() => {
+                void api<AdminState>('/settings', { paused: !paused }).then(setState)
+              }}
+            >
+              {paused ? t.resume : t.pause}
+            </button>
+          )}
           <button
             type="button"
             className="btn"
@@ -665,6 +936,7 @@ export function App() {
         </p>
       )}
       {paused && <p className="banner calm">{t.pausedHint}</p>}
+      {offline && <p className="banner calm">{t.offlineHint}</p>}
 
       <main className="layout">
         <section className="card conversation">
@@ -673,15 +945,28 @@ export function App() {
             <span className="muted">{events.length}</span>
           </header>
           <Feed events={events} slotOf={slotOf} t={t} lang={lang} />
-          <Composer hostName={hostName} t={t} onSent={refresh} />
+          <Composer hostName={myName} t={t} onSent={refresh} />
         </section>
 
         <aside className="side">
-          <Addresses state={state} t={t} />
-          <Members state={state} t={t} lang={lang} refresh={refresh} onInvite={setInvite} />
+          <Approvals state={state} t={t} onChanged={setState} />
+          {isHost ? (
+            <Addresses state={state} t={t} />
+          ) : (
+            <Connection state={state} t={t} lang={lang} onChanged={setState} />
+          )}
+          <Members
+            state={state}
+            t={t}
+            lang={lang}
+            refresh={refresh}
+            onInvite={setInvite}
+            manage={isHost}
+          />
           <Debates state={state} t={t} refresh={refresh} />
           <Reports state={state} t={t} />
-          <Rules state={state} t={t} onSaved={setState} />
+          <MyAgent state={state} t={t} onChanged={setState} onToken={setInvite} />
+          {isHost && <Rules state={state} t={t} onSaved={setState} />}
         </aside>
       </main>
 

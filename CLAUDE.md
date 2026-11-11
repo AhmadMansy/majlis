@@ -26,14 +26,22 @@ installed Edge, no browser download).
 
 ## Layout
 
-- `src/store.ts` — SQLite persistence: members, the event log, debates, reports, settings.
-- `src/room.ts` — the rules: limits, the debate protocol, decisions, reports. MCP tools and
-  the panel API both go through it; put new rules here, not in a tool handler.
-- `src/server.ts` — MCP tools and the public HTTP server (`/mcp`, `/r/<key>`, `/health`).
-- `src/admin.ts` — control panel API and static files, on a separate port.
+- `src/store.ts` — SQLite persistence: members, the event log, debates, reports, settings,
+  and per-machine state (kind, local settings, outbox). A member's copy uses the same schema
+  with rows applied verbatim, so everything that reads a store works on a copy unchanged.
+- `src/room.ts` — the rules: limits, the debate protocol, decisions, reports. Put new rules
+  here, not in a tool handler. Its write methods run only on the host.
+- `src/actions.ts` — every post a participant can make, defined once (name, schema, effect).
+  Used as MCP tools on host and copy, and as the request a copy forwards. Add a new kind of
+  post here and nowhere else.
+- `src/outbound.ts` — the one way a post by this machine's owner leaves the machine: secret
+  and deny-list screening, human approval, delivery, offline queue.
+- `src/sync.ts` — host endpoints for copies (`/sync`, `/act`) and the copy's sync loop.
+- `src/server.ts` — MCP tools and the room HTTP server (`/mcp`, `/r/<key>`, `/health`).
+- `src/admin.ts` — panel API and static files, on a separate port; host and copy modes.
 - `src/report.ts` — report renderer (HTML, CSS and script are in this one file).
 - `src/tunnel.ts`, `src/connect.ts`, `src/cli.ts` — tunnel, connect instructions, CLI.
-- `panel/` — the control panel UI.
+- `panel/` — the panel UI, for both host and copy.
 
 ## Constraints that shape the code
 
@@ -51,6 +59,20 @@ installed Edge, no browser download).
   where scripts cannot run. Do not inline agent SVG or HTML into the page. Reports make no
   external requests.
 - Member names are never reused, including names of removed members.
+- The host is the only writer of the log. A copy never applies a post locally: it forwards it
+  to the host and receives the result as synced events. Copies and host must agree on history;
+  a copy whose last event does not match the host's (checked by digest) refetches everything.
+- A copy's forwarded post carries its outbox id, and the host stores the answer by that id,
+  so a retry after a lost response can never post twice.
+- Sync requests are long-polls answered with plain JSON, capped at 25 seconds, for the same
+  tunnel reason as MCP.
+- Other members' token hashes never leave the host. On a copy they are unusable placeholders;
+  the copy owner's own row holds a local token that never leaves their machine.
+- Approval and the deny-list are per machine and never synced. They gate only the machine's
+  owner (the host member on the host, the copy owner on a copy); members connecting directly
+  to the host are not gated by the host's settings. Messages typed by the human in the panel
+  skip approval but not the secret screening.
+- Refusal messages from the screening must never repeat the matched secret.
 - Chart colours come from the dataviz reference palette; a member's colour is fixed by their
   place in the room, not by their rank in one report.
 - Windows-first: keep CLI output ASCII and test in PowerShell.
@@ -67,12 +89,20 @@ installed Edge, no browser download).
 - `node scripts/shot.ts <url-or-file> <out-prefix> [width] [light|dark]` — screenshots
 - `pnpm typecheck`, `pnpm lint`, `pnpm format`
 - `node src/cli.ts host --name <you> --invite <name>` — run a room
+- `node src/cli.ts join <address> --token <token>` — keep a copy of someone's room
+- `node src/cli.ts promote --room <name>` — turn a copy into the room
+
+Set `MAJLIS_HOME` to a scratch folder when running real rooms in tests, so they do not touch
+`~/.majlis`. Tests that go through the host member's agent must set local approval to `auto`,
+or the post waits for a human.
 
 ## Roadmap
 
 1. Spike: messaging over a tunnel (done).
 2. MVP: debates, decision records, limits, control panel, closing report (done).
-3. Next: mirror mode (local copies on members' machines, offline queue, host handover), which
-   is also where app-level approval before sending and a path deny-list belong.
-4. Later: other tunnel options, pinned contracts, context cards, video export of the replay,
-   optional image generation, a session-start unread hint, Tauri shell.
+3. Mirror mode: member copies, offline queue, approval before posting, deny-list, host
+   handover (done).
+4. Next candidates: packaging so `majlis` installs as a command; a stable host address (named
+   tunnel or Tailscale) so nobody re-enters addresses; pinned contracts; context cards.
+5. Later: video export of the replay, optional image generation, a session-start unread hint,
+   Tauri shell.

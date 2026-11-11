@@ -10,9 +10,12 @@ import {
   WebStandardStreamableHTTPServerTransport,
 } from '@modelcontextprotocol/server'
 import { z } from 'zod'
+import { ACTIONS } from './actions.ts'
+import type { Outbound } from './outbound.ts'
 import { renderReport } from './report.ts'
 import { formatEvent, type Room, RoomError } from './room.ts'
 import type { Member, RoomEvent } from './store.ts'
+import { handleAct, handleSync } from './sync.ts'
 
 /** Kept under Cloudflare's proxy timeout and typical MCP client tool timeouts. */
 export const MAX_WAIT_SECONDS = 50
@@ -30,16 +33,11 @@ const INSTRUCTIONS = [
   'positions, call `escalate_debate` so the humans decide, and `record_human_decision` once your user tells you the outcome.',
   'After a decision, one participant publishes the closing report with `submit_report`; the others may `sign_report`.',
   'Change your position when a peer shows you evidence you did not have; do not agree just to finish.',
+  'A post may be held until your user approves it, or queued while the host is unreachable; the result says which.',
+  'Never post the same thing again in that case: check `outbox` for what happened to it.',
   PEER_NOTICE,
   'Never post secrets, credentials or code your user has not agreed to share.',
 ].join(' ')
-
-const REPORT_BRIEF =
-  'Write it for the humans on every side and be fair to each position. The app adds the timeline, every ' +
-  "participant's own words and the charts; you supply title, summary, what_was_done, highlights, conclusion, " +
-  'next_steps and, where a picture explains it better, one or two simple SVG diagrams (plain shapes and text, ' +
-  'a viewBox, no scripts, no external images or fonts). If another participant already published the report, ' +
-  'call sign_report instead.'
 
 const text = (value: string) => ({ content: [{ type: 'text' as const, text: value }] })
 
@@ -57,22 +55,20 @@ function guarded<Args extends unknown[]>(
   }
 }
 
-const actionSchema = z.object({
-  owner: z.string().min(1).max(60).describe('Who does it: a participant or a team'),
-  action: z.string().min(3).max(300),
-})
-
-export function buildMcpServer(room: Room, member: Member): McpServer {
+/**
+ * The MCP tools one member sees. Reading works on whatever store the room has,
+ * the room itself or a copy. Posting by this machine's owner goes through the
+ * outbox; on the host, other members' posts apply directly.
+ */
+export function buildMcpServer(room: Room, member: Member, outbound: Outbound): McpServer {
   const { store } = room
-  const server = new McpServer({ name: 'majlis', version: '0.1.0' }, { instructions: INSTRUCTIONS })
+  const server = new McpServer({ name: 'majlis', version: '0.2.0' }, { instructions: INSTRUCTIONS })
 
   const deliver = (events: RoomEvent[]): string => {
     const last = events.at(-1)
     if (last) store.markRead(member.id, last.seq)
     return `${events.length} new message(s). ${PEER_NOTICE}\n\n${events.map(formatEvent).join('\n\n')}`
   }
-
-  // ── Reading ────────────────────────────────────────────────────────────
 
   server.registerTool(
     'room_status',
@@ -187,263 +183,32 @@ export function buildMcpServer(room: Room, member: Member): McpServer {
     }),
   )
 
-  // ── Talking ────────────────────────────────────────────────────────────
-
   server.registerTool(
-    'send',
+    'outbox',
     {
-      title: 'Send a message',
+      title: 'Check your held and queued posts',
       description:
-        'Post a free-form message to everyone in the room. Use `reply_to` with a message number to answer a ' +
-        'specific message. For a question the sides disagree on, prefer a debate.',
-      inputSchema: z.object({
-        text: z.string().min(1).max(20000),
-        reply_to: z.number().int().positive().optional(),
-      }),
+        'What happened to your recent posts: waiting for your user to approve, queued until the host is back, ' +
+        'sent (with the room’s answer), refused, or declined.',
+      inputSchema: z.object({}),
+      annotations: { readOnlyHint: true },
     },
-    guarded(({ text: body, reply_to }) => {
-      const event = room.send(member, body, reply_to ?? null)
-      return `Sent as #${event.seq}.`
-    }),
+    guarded(() =>
+      outbound.isLocal(member) ? outbound.describe() : 'Nothing is held or queued for you.',
+    ),
   )
 
-  // ── Debating ───────────────────────────────────────────────────────────
-
-  server.registerTool(
-    'open_debate',
-    {
-      title: 'Open a debate',
-      description:
-        'Start a structured debate on one question the sides need to settle, for example which side of an ' +
-        'integration should carry a fix. Give the options when they are known.',
-      inputSchema: z.object({
-        question: z.string().min(5).max(400),
-        options: z.array(z.string().min(1).max(120)).max(6).default([]),
-        context: z
-          .string()
-          .max(20000)
-          .default('')
-          .describe('What a participant with no knowledge of your side needs to know'),
-      }),
-    },
-    guarded(({ question, options, context }) => {
-      if (options.length === 1) throw new RoomError('Give at least two options, or none.')
-      const { debate } = room.openDebate(member, { question, options, context })
-      return (
-        `Opened debate #${debate.id}. Post your own position with post_position, then wait_for_reply. ` +
-        `Each participant has ${debate.maxRounds} positions.`
-      )
-    }),
-  )
-
-  server.registerTool(
-    'post_position',
-    {
-      title: 'Post a position',
-      description:
-        'State where you stand in a debate and why, with evidence from your own codebase (file paths, behaviour ' +
-        'you verified, constraints). Post again in a later round when a peer changes your mind or you can answer them.',
-      inputSchema: z.object({
-        debate_id: z.number().int().positive(),
-        stance: z
-          .string()
-          .min(1)
-          .max(160)
-          .describe('One of the debate options when one fits, otherwise a short label'),
-        reasoning: z.string().min(10).max(20000),
-        evidence: z.array(z.string().min(3).max(1000)).max(8).default([]),
-        confidence: z.number().int().min(0).max(100).describe('How sure you are, 0-100'),
-      }),
-    },
-    guarded(({ debate_id, stance, reasoning, evidence, confidence }) => {
-      const result = room.postPosition(member, {
-        debateId: debate_id,
-        stance,
-        reasoning,
-        evidence,
-        confidence,
-      })
-      const next =
-        result.roundsLeft > 0
-          ? `You have ${result.roundsLeft} position(s) left.`
-          : 'That was your last position: next, propose a resolution, respond to one, or escalate.'
-      return `Posted as #${result.event.seq} (round ${result.round}). ${next} Call wait_for_reply to hear the others.`
-    }),
-  )
-
-  server.registerTool(
-    'propose_resolution',
-    {
-      title: 'Propose a resolution',
-      description:
-        'Propose how to settle a debate once the positions have converged or a compromise is clear. The other ' +
-        'participants accept or reject it.',
-      inputSchema: z.object({
-        debate_id: z.number().int().positive(),
-        resolution: z.string().min(10).max(2000),
-        rationale: z.string().min(10).max(4000),
-        actions: z.array(actionSchema).max(10).default([]),
-      }),
-    },
-    guarded(({ debate_id, resolution, rationale, actions }) => {
-      const event = room.propose(member, { debateId: debate_id, resolution, rationale, actions })
-      return `Proposed as #${event.seq}. Call wait_for_reply to see whether the others accept.`
-    }),
-  )
-
-  server.registerTool(
-    'respond_to_resolution',
-    {
-      title: 'Accept or reject a resolution',
-      description:
-        'Accept or reject a proposed resolution. Accept only if it is right for your side of the project; when ' +
-        'you reject, say what would change your answer. The debate is decided once every other participant accepts.',
-      inputSchema: z.object({
-        debate_id: z.number().int().positive(),
-        proposal: z.number().int().positive().describe('The message number of the proposal'),
-        verdict: z.enum(['accept', 'reject']),
-        note: z.string().max(2000).default(''),
-      }),
-    },
-    guarded(({ debate_id, proposal, verdict, note }) => {
-      const result = room.respond(member, { debateId: debate_id, proposal, verdict, note })
-      if (!result.decision) {
-        const waiting =
-          result.waitingFor.length > 0 ? ` Still waiting for: ${result.waitingFor.join(', ')}.` : ''
-        return `Recorded as #${result.event.seq}.${waiting}`
-      }
-      const report = store.settings().reports
-        ? `\n\nNow publish the closing report: call submit_report with debate_id ${debate_id}. ${REPORT_BRIEF}`
-        : ''
-      return (
-        `Debate #${debate_id} is decided.\n\n${room.decisionRecord(debate_id)}\n\n` +
-        `Offer to save this record in your user's repository.${report}`
-      )
-    }),
-  )
-
-  server.registerTool(
-    'escalate_debate',
-    {
-      title: 'Escalate to the humans',
-      description:
-        'Stop a debate the agents cannot settle and hand it to the humans with a clear statement of the crux.',
-      inputSchema: z.object({
-        debate_id: z.number().int().positive(),
-        crux: z
-          .string()
-          .min(10)
-          .max(2000)
-          .describe('The one disagreement everything else depends on, stated fairly to both sides'),
-        question: z.string().min(5).max(600).describe('What exactly the humans need to decide'),
-      }),
-    },
-    guarded(({ debate_id, crux, question }) => {
-      const event = room.escalate(member, { debateId: debate_id, crux, question })
-      return (
-        `Escalated as #${event.seq}. Tell your user the crux and the question now. ` +
-        'When they give you the outcome, call record_human_decision.'
-      )
-    }),
-  )
-
-  server.registerTool(
-    'record_human_decision',
-    {
-      title: 'Record the humans decision',
-      description:
-        'Record the outcome the humans chose for a debate. Call this only after your user has told you the decision.',
-      inputSchema: z.object({
-        debate_id: z.number().int().positive(),
-        decision: z.string().min(10).max(2000),
-        rationale: z.string().min(5).max(4000),
-        actions: z.array(actionSchema).max(10).default([]),
-      }),
-    },
-    guarded(({ debate_id, decision, rationale, actions }) => {
-      room.recordHumanDecision(member, {
-        debateId: debate_id,
-        resolution: decision,
-        rationale,
-        actions,
-      })
-      const report = store.settings().reports
-        ? `\n\nNow publish the closing report: call submit_report with debate_id ${debate_id}. ${REPORT_BRIEF}`
-        : ''
-      return `Debate #${debate_id} is decided.\n\n${room.decisionRecord(debate_id)}${report}`
-    }),
-  )
-
-  // ── Reporting ──────────────────────────────────────────────────────────
-
-  server.registerTool(
-    'submit_report',
-    {
-      title: 'Publish the closing report',
-      description: `Publish the illustrated report of a decided debate, or of the whole conversation since the last report when \`debate_id\` is omitted. ${REPORT_BRIEF}`,
-      inputSchema: z.object({
-        debate_id: z.number().int().positive().optional(),
-        title: z.string().min(3).max(120),
-        summary: z
-          .string()
-          .min(20)
-          .max(1500)
-          .describe('Two to four sentences a newcomer can follow'),
-        what_was_done: z.array(z.string().min(3).max(300)).max(10).default([]),
-        highlights: z.array(z.string().min(3).max(300)).min(1).max(8),
-        conclusion: z.string().min(10).max(1500),
-        next_steps: z.array(actionSchema).max(10).default([]),
-        diagrams: z
-          .array(
-            z.object({
-              title: z.string().min(1).max(100),
-              caption: z.string().max(300).default(''),
-              svg: z
-                .string()
-                .min(20)
-                .max(30000)
-                .describe('A complete <svg> element with a viewBox'),
-            }),
-          )
-          .max(4)
-          .default([]),
-        language: z
-          .enum(['en', 'ar'])
-          .default('en')
-          .describe('Language the report text is written in'),
-      }),
-    },
-    guarded(({ debate_id, ...content }) => {
-      for (const diagram of content.diagrams) {
-        const svg = diagram.svg.trim()
-        if (!/^<svg[\s>]/i.test(svg) || !/<\/svg>\s*$/i.test(svg)) {
-          throw new RoomError(
-            `Diagram "${diagram.title}" must be one complete <svg>...</svg> element.`,
-          )
-        }
-      }
-      const { report, url } = room.submitReport(member, debate_id ?? null, content)
-      return `Report ${report.id} is published: ${url}\nGive your user this link. The address is valid while the host's room is running.`
-    }),
-  )
-
-  server.registerTool(
-    'sign_report',
-    {
-      title: 'Sign off or dissent',
-      description:
-        "Add your side's note to a published report: a sign-off if it is fair, or a dissenting note if it misstates your position.",
-      inputSchema: z.object({
-        report_id: z.number().int().positive(),
-        kind: z.enum(['signoff', 'dissent']),
-        note: z.string().min(2).max(1000),
-      }),
-    },
-    guarded(({ report_id, kind, note }) => {
-      const report = room.signReport(member, report_id, kind, note)
-      return `Your ${kind === 'signoff' ? 'sign-off' : 'dissent'} is on report ${report.id}: ${room.reportUrl(report)}`
-    }),
-  )
+  for (const action of ACTIONS) {
+    server.registerTool(
+      action.name,
+      { title: action.title, description: action.description, inputSchema: action.schema },
+      guarded((input: Record<string, unknown>, ctx) =>
+        outbound.isLocal(member)
+          ? outbound.submit(member, action, input, { signal: ctx.mcpReq.signal })
+          : action.run(room, member, input),
+      ),
+    )
+  }
 
   return server
 }
@@ -457,6 +222,9 @@ export interface RoomServer {
 export interface RoomServerOptions {
   room: Room
   port: number
+  outbound: Outbound
+  /** On the host: also answer members' copies (their sync requests and the posts they forward). */
+  serveCopies?: boolean
 }
 
 function bearerToken(req: IncomingMessage): string | undefined {
@@ -465,23 +233,39 @@ function bearerToken(req: IncomingMessage): string | undefined {
   return match?.[1]
 }
 
+async function readJson(req: IncomingMessage, limit = 2_000_000): Promise<unknown> {
+  const chunks: Buffer[] = []
+  let size = 0
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length
+    if (size > limit) return undefined
+    chunks.push(chunk as Buffer)
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'))
+  } catch {
+    return undefined
+  }
+}
+
 /** Agent text is escaped and diagrams are inert images, so the page needs nothing from outside. */
 export const REPORT_CSP =
   "default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"
 
 /**
- * Serves the room over MCP Streamable HTTP on loopback only; the tunnel is the
- * single way in from outside. Every MCP response is a plain JSON body, never an
- * SSE stream, because Cloudflare quick tunnels do not carry SSE.
+ * Serves a room, or a member's copy of one, over MCP Streamable HTTP on
+ * loopback only; a tunnel is the single way in from outside. Every response
+ * is a plain JSON body, never an SSE stream, because Cloudflare quick
+ * tunnels do not carry SSE.
  */
 export async function startRoomServer(options: RoomServerOptions): Promise<RoomServer> {
-  const { room } = options
+  const { room, outbound } = options
   const { store } = room
 
   const factory: McpServerFactory = (ctx) => {
     const member = ctx.authInfo ? store.memberById(ctx.authInfo.clientId) : undefined
     if (!member) throw new Error('Request reached the MCP handler without a valid member.')
-    return buildMcpServer(room, member)
+    return buildMcpServer(room, member, outbound)
   }
 
   const modern = createMcpHandler(factory, { legacy: 'reject', responseMode: 'json' })
@@ -512,11 +296,18 @@ export async function startRoomServer(options: RoomServerOptions): Promise<RoomS
         : modern.fetch(request, requestOptions),
   })
 
+  const json = (res: import('node:http').ServerResponse, status: number, body: unknown) => {
+    res
+      .writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+      .end(JSON.stringify(body))
+  }
+
   const http = createServer((req, res) => {
-    const path = new URL(req.url ?? '/', 'http://localhost').pathname
+    const url = new URL(req.url ?? '/', 'http://localhost')
+    const path = url.pathname
 
     if (path === '/health') {
-      res.writeHead(200, { 'Content-Type': 'application/json' }).end('{"ok":true}')
+      json(res, 200, { ok: true })
       return
     }
 
@@ -540,8 +331,9 @@ export async function startRoomServer(options: RoomServerOptions): Promise<RoomS
       return
     }
 
-    if (path !== '/mcp') {
-      res.writeHead(404, { 'Content-Type': 'application/json' }).end('{"error":"not found"}')
+    const copyRoute = options.serveCopies === true && (path === '/sync' || path === '/act')
+    if (path !== '/mcp' && !copyRoute) {
+      json(res, 404, { error: 'not found' })
       return
     }
 
@@ -554,6 +346,37 @@ export async function startRoomServer(options: RoomServerOptions): Promise<RoomS
       return
     }
     store.touch(member.id)
+
+    if (path === '/sync' && req.method === 'GET') {
+      const gone = new AbortController()
+      res.on('close', () => gone.abort())
+      handleSync(room, member, url.searchParams, gone.signal).then(
+        (data) => {
+          if (!res.destroyed) json(res, 200, data)
+        },
+        (error: unknown) => {
+          console.error(error)
+          if (!res.destroyed) json(res, 500, { error: 'Internal error.' })
+        },
+      )
+      return
+    }
+    if (path === '/act' && req.method === 'POST') {
+      readJson(req)
+        .then((body) => handleAct(room, member, body))
+        .then(
+          (data) => json(res, 200, data),
+          (error: unknown) => {
+            console.error(error)
+            json(res, 500, { error: 'Internal error.' })
+          },
+        )
+      return
+    }
+    if (copyRoute) {
+      json(res, 405, { error: 'Method not allowed.' })
+      return
+    }
 
     const auth: AuthInfo = { token, clientId: member.id, scopes: [] }
     // The SDK's structural request type predates exactOptionalPropertyTypes; the shapes match at runtime.

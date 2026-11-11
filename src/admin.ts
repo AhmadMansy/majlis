@@ -4,9 +4,19 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { AddressInfo } from 'node:net'
 import { extname, join, normalize, sep } from 'node:path'
 import { z } from 'zod'
+import { ACTIONS_BY_NAME } from './actions.ts'
 import { type ConnectInfo, connectInfo } from './connect.ts'
+import type { Outbound } from './outbound.ts'
 import { type DebateView, type Room, RoomError } from './room.ts'
-import type { DebateStatus, Member, RoomEvent, Settings } from './store.ts'
+import type {
+  ApprovalMode,
+  DebateStatus,
+  Member,
+  OutboxItem,
+  RoomEvent,
+  Settings,
+} from './store.ts'
+import { normalizeHostUrl, type SyncClient, type SyncStatus } from './sync.ts'
 
 /** What the control panel shows; the panel imports these types. */
 export interface AdminState {
@@ -31,6 +41,14 @@ export interface AdminState {
     publicUrl: string | null
   }>
   lastSeq: number
+  /** Whether this panel belongs to the room's host or to a member's copy. */
+  mode: 'host' | 'mirror'
+  me: { id: string; name: string; role: Member['role'] } | null
+  /** This machine's own settings: never shared with the room. */
+  local: { approval: ApprovalMode; deny: string[] }
+  outbox: OutboxItem[]
+  /** A copy's connection to its room; null on the host. */
+  sync: SyncStatus | null
 }
 
 export interface AdminEvents {
@@ -101,6 +119,15 @@ const decideBody = z.object({
     .default([]),
 })
 
+const localPatch = z
+  .object({
+    approval: z.enum(['every', 'debate', 'auto']),
+    deny: z.array(z.string().trim().min(1).max(200)).max(100),
+  })
+  .partial()
+  .strict()
+const addressBody = z.object({ url: z.string().trim().min(8).max(500) })
+
 class HttpError extends Error {
   readonly status: number
   constructor(status: number, message: string) {
@@ -141,6 +168,10 @@ export interface AdminServerOptions {
   port: number
   /** Folder with the built panel. Defaults to panel/dist next to src. */
   panelDir?: string
+  /** This machine's outbox: approvals, and the human's own messages. */
+  outbound: Outbound
+  /** On a member's copy: its connection to the room. */
+  sync?: SyncClient
 }
 
 /**
@@ -155,15 +186,31 @@ export async function startAdminServer(options: AdminServerOptions): Promise<Adm
   const key = randomBytes(24).toString('base64url')
   const keyBytes = Buffer.from(key)
 
-  const host = (): Member => {
-    const member = store.hostMember()
-    if (!member) throw new HttpError(500, 'This room has no host member.')
+  const mode = store.kind() === 'mirror' ? 'mirror' : 'host'
+  const { outbound } = options
+
+  /** The owner of this machine: the host member, or on a copy the member the copy belongs to. */
+  const me = (): Member => {
+    const config = store.mirrorConfig()
+    const member = mode === 'mirror' && config ? store.memberById(config.meId) : store.hostMember()
+    if (!member) throw new HttpError(500, 'This machine has no member in the room.')
     return member
+  }
+  const hostOnly = (): void => {
+    if (mode !== 'host') throw new HttpError(403, 'Only the host of the room can do that.')
   }
 
   const state = (): AdminState => {
     const posts = store.postCounts()
+    const local = store.localSettings()
+    const self =
+      mode === 'mirror' ? store.memberById(store.mirrorConfig()?.meId ?? '') : store.hostMember()
     return {
+      mode,
+      me: self ? { id: self.id, name: self.name, role: self.role } : null,
+      local: { approval: local.approval, deny: local.deny },
+      outbox: store.outbox(10),
+      sync: options.sync?.status() ?? null,
       room: { name: room.name, local: room.urls.local, public: room.urls.public },
       settings: store.settings(),
       members: store.members().map((member) => ({ ...member, posts: posts[member.id] ?? 0 })),
@@ -195,7 +242,7 @@ export async function startAdminServer(options: AdminServerOptions): Promise<Adm
   const api = async (req: IncomingMessage, url: URL): Promise<unknown> => {
     const path = url.pathname.slice('/api'.length)
     const method = req.method ?? 'GET'
-    const id = /^\/(members|debates)\/([^/]+)/.exec(path)?.[2] ?? ''
+    const id = /^\/(members|debates|outbox)\/([^/]+)/.exec(path)?.[2] ?? ''
 
     if (method === 'GET' && path === '/state') return state()
     if (method === 'GET' && path === '/events') {
@@ -217,13 +264,67 @@ export async function startAdminServer(options: AdminServerOptions): Promise<Adm
     if (method !== 'POST') throw new HttpError(404, 'Not found.')
 
     const body = await readJson(req)
+
+    // ── This machine's own controls: the same on the host and on a copy ──
+    if (path === '/messages') {
+      const input = parse(messageBody, body)
+      const send = ACTIONS_BY_NAME.get('send')
+      if (!send) throw new HttpError(500, 'The send action is missing.')
+      const text = await outbound.submit(
+        me(),
+        send,
+        { text: input.text, ...(input.replyTo === null ? {} : { reply_to: input.replyTo }) },
+        { human: true },
+      )
+      // A copy shows its owner's message as soon as the room has it, without waiting for the next poll.
+      await options.sync?.syncOnce(0).catch(() => undefined)
+      return { text }
+    }
+    if (/^\/outbox\/[^/]+\/approve$/.test(path)) {
+      await outbound.approve(id)
+      await options.sync?.syncOnce(0).catch(() => undefined)
+      return state()
+    }
+    if (/^\/outbox\/[^/]+\/reject$/.test(path)) {
+      outbound.reject(id)
+      return state()
+    }
+    if (path === '/local') {
+      const patch = parse(localPatch, body)
+      store.updateLocalSettings({
+        ...(patch.approval === undefined ? {} : { approval: patch.approval }),
+        ...(patch.deny === undefined ? {} : { deny: patch.deny }),
+      })
+      return state()
+    }
+    if (path === '/host-address') {
+      const config = store.mirrorConfig()
+      if (mode !== 'mirror' || !config) throw new HttpError(400, 'This is not a copy of a room.')
+      let hostUrl: string
+      try {
+        hostUrl = normalizeHostUrl(parse(addressBody, body).url)
+      } catch (error) {
+        throw new HttpError(400, error instanceof Error ? error.message : 'Invalid address.')
+      }
+      store.setMirrorConfig({ ...config, hostUrl })
+      await options.sync?.syncOnce(0).catch(() => undefined)
+      return state()
+    }
+    if (path === '/me/token') {
+      if (mode !== 'mirror') throw new HttpError(400, 'Use "New token" in the member list.')
+      const self = me()
+      const invite: AdminInvite = {
+        member: self,
+        connect: connectInfo(room.urls.local, store.issueLocalToken(self.id)),
+      }
+      return invite
+    }
+
+    // ── The room's controls: host only ──
+    hostOnly()
     if (path === '/settings') {
       store.updateSettings(parse(settingsPatch, body) as Partial<Settings>)
       return state()
-    }
-    if (path === '/messages') {
-      const input = parse(messageBody, body)
-      return room.send(host(), input.text, input.replyTo, true)
     }
     if (path === '/members') {
       const input = parse(inviteBody, body)
@@ -233,7 +334,7 @@ export async function startAdminServer(options: AdminServerOptions): Promise<Adm
       const { member, token } = store.addMember(input.name, input.role)
       const invite: AdminInvite = {
         member,
-        connect: connectInfo(room.urls.public ?? room.urls.local, token),
+        connect: connectInfo(room.urls.public ?? room.urls.local, token, true),
       }
       return invite
     }
@@ -242,7 +343,10 @@ export async function startAdminServer(options: AdminServerOptions): Promise<Adm
       const token = member ? store.rotateToken(member.name) : undefined
       if (!member || !token) throw new HttpError(404, 'No such member.')
       const base = member.role === 'host' ? room.urls.local : (room.urls.public ?? room.urls.local)
-      const invite: AdminInvite = { member, connect: connectInfo(base, token) }
+      const invite: AdminInvite = {
+        member,
+        connect: connectInfo(base, token, member.role !== 'host'),
+      }
       return invite
     }
     if (/^\/members\/[^/]+\/revoke$/.test(path)) {
@@ -257,7 +361,7 @@ export async function startAdminServer(options: AdminServerOptions): Promise<Adm
     }
     if (/^\/debates\/\d+\/decide$/.test(path)) {
       const input = parse(decideBody, body)
-      room.recordHumanDecision(host(), { debateId: Number(id), ...input }, true)
+      room.recordHumanDecision(me(), { debateId: Number(id), ...input }, true)
       return state()
     }
     throw new HttpError(404, 'Not found.')

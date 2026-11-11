@@ -4,6 +4,7 @@
  * Run with `pnpm e2e:tunnel`. Needs network access and cloudflared.
  */
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
+import { hostOutbound } from '../src/outbound.ts'
 import { Room } from '../src/room.ts'
 import { startRoomServer } from '../src/server.ts'
 import { RoomStore } from '../src/store.ts'
@@ -39,7 +40,15 @@ function check(label: string, ok: boolean, detail = ''): void {
 const store = new RoomStore(':memory:')
 const hostToken = store.addMember('Host', 'host').token
 const remoteToken = store.addMember('Remote', 'member').token
-const server = await startRoomServer({ room: new Room(store, 'e2e'), port: 0 })
+// This check is about the tunnel, so the host's own agent posts without the approval step.
+store.updateLocalSettings({ approval: 'auto' })
+const room = new Room(store, 'e2e')
+const server = await startRoomServer({
+  room,
+  port: 0,
+  outbound: hostOutbound(room),
+  serveCopies: true,
+})
 const tunnel = await startQuickTunnel(server.port)
 
 try {
@@ -97,7 +106,7 @@ try {
   const answer = await call(host, 'wait_for_reply', { timeout_seconds: 5 })
   check(
     'host agent receives the remote answer',
-    answer.includes('[#3] Remote') && answer.includes('(reply to #2)'),
+    answer.includes('[#3] Remote') && answer.includes('reply to #2'),
   )
 
   await Promise.all([host.close(), remote.close()])
