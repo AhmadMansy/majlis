@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Majlis and its alternatives</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  /* Layout: one reading column; the verdict first, the evidence table after it, sources last. */
+  color-scheme: light;
+  --bg: #f4f6f5;
+  --surface: #ffffff;
+  --ink: #14201d;
+  --ink-2: #45534f;
+  --muted: #6b7773;
+  --line: #dbe2df;
+  --accent: #0d6e62;
+  --accent-wash: #dff0ec;
+  --partial: #a76200;
+  --absent: #93a09b;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0e1513;
+    --surface: #151e1b;
+    --ink: #e8efec;
+    --ink-2: #b4c0bb;
+    --muted: #8a9792;
+    --line: #26322e;
+    --accent: #4fc3b2;
+    --accent-wash: #12302b;
+    --partial: #e0a03a;
+    --absent: #5d6a66;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0e1513;
+  --surface: #151e1b;
+  --ink: #e8efec;
+  --ink-2: #b4c0bb;
+  --muted: #8a9792;
+  --line: #26322e;
+  --accent: #4fc3b2;
+  --accent-wash: #12302b;
+  --partial: #e0a03a;
+  --absent: #5d6a66;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.6 var(--body);
+  -webkit-font-smoothing: antialiased;
+}
+main { max-width: 1120px; margin: 0 auto; padding: 40px 20px 72px; }
+.col { max-width: 72ch; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(32px, 5.2vw, 52px); line-height: 1.05; letter-spacing: -0.02em; }
+h2 { font-size: 28px; line-height: 1.15; letter-spacing: -0.01em; margin-bottom: 8px; }
+h3 { font-size: 20px; line-height: 1.2; }
+p { margin: 0; }
+a { color: var(--accent); text-underline-offset: 3px; }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+section { margin-top: 64px; }
+.eyebrow { font-size: 13px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--accent); margin-bottom: 14px; }
+.lede { font-size: 20px; line-height: 1.5; color: var(--ink-2); margin-top: 20px; }
+.sub { color: var(--ink-2); margin-bottom: 24px; }
+.note { margin-top: 24px; padding: 14px 18px; border-inline-start: 3px solid var(--accent); background: var(--surface); border-radius: 0 10px 10px 0; color: var(--ink-2); font-size: 15px; }
+
+/* Ranking */
+.rank { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.rank li { display: grid; grid-template-columns: 56px 1fr; gap: 4px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; }
+.rank li.subject { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
+.rank .num { grid-row: 1 / span 3; font-family: var(--display); font-weight: 700; font-size: 40px; line-height: 1; color: var(--absent); font-variant-numeric: tabular-nums; }
+.rank li.subject .num { color: var(--accent); }
+.rank .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
+.chip { font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); white-space: nowrap; }
+.chip.live { background: var(--accent-wash); border-color: transparent; color: var(--accent); }
+.rank .claim { font-weight: 500; margin-top: 6px; }
+.rank dl { margin: 10px 0 0; display: grid; gap: 6px; font-size: 15px; color: var(--ink-2); }
+.rank dl div { display: grid; grid-template-columns: 116px 1fr; gap: 10px; }
+.rank dt { font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); padding-top: 3px; }
+.rank dd { margin: 0; }
+
+/* Feature table */
+.scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 1080px; font-size: 14px; table-layout: fixed; }
+thead th:first-child { width: 200px; }
+th, td { padding: 12px 12px; border-bottom: 1px solid var(--line); vertical-align: top; text-align: start; }
+thead th { font-family: var(--display); font-size: 15px; font-weight: 700; line-height: 1.2; background: var(--surface); position: sticky; top: 0; }
+thead th small { display: block; font: 400 12px/1.3 var(--body); color: var(--muted); margin-top: 3px; }
+tbody th { font-weight: 500; width: 190px; position: sticky; inset-inline-start: 0; background: var(--surface); }
+thead th:first-child { inset-inline-start: 0; z-index: 2; }
+tr.group th { font-size: 12px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); background: var(--bg); padding-block: 8px; }
+tbody tr:last-child th, tbody tr:last-child td { border-bottom: 0; }
+td.subject, th.subject { background: var(--accent-wash); }
+.m { display: flex; align-items: flex-start; gap: 7px; font-weight: 600; line-height: 1.3; }
+.m::before { margin-top: 2px; }
+.legend .m { white-space: nowrap; }
+.m::before { content: ""; flex: none; width: 13px; height: 13px; border-radius: 50%; border: 2px solid currentColor; }
+.m.y { color: var(--accent); }
+.m.y::before { background: currentColor; }
+.m.p { color: var(--partial); }
+.m.p::before { background: linear-gradient(90deg, currentColor 50%, transparent 50%); }
+.m.n { color: var(--absent); }
+.m.x { color: var(--muted); font-weight: 400; }
+.m.x::before { width: 13px; height: 0; border: 0; border-top: 2px solid currentColor; border-radius: 0; }
+.m.q { color: var(--muted); font-weight: 400; }
+.m.q::before { border-style: dotted; }
+td small { display: block; margin-top: 3px; color: var(--ink-2); font-size: 12.5px; line-height: 1.35; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 14px 0 0; font-size: 14px; color: var(--ink-2); }
+
+/* Two-column lists */
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 22px; }
+.panel h3 { margin-bottom: 12px; }
+.panel ul { margin: 0; padding-inline-start: 20px; display: grid; gap: 10px; color: var(--ink-2); }
+.panel li::marker { color: var(--accent); }
+.panel b { color: var(--ink); font-weight: 600; }
+
+.sources { margin: 0; padding-inline-start: 20px; display: grid; gap: 8px; font-size: 15px; color: var(--ink-2); overflow-wrap: anywhere; }
+footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+
+@media (max-width: 560px) {
+  .rank li { grid-template-columns: 1fr; padding: 18px; }
+  .rank .num { grid-row: auto; font-size: 30px; }
+  .rank dl div { grid-template-columns: 1fr; gap: 0; }
+  section { margin-top: 48px; }
+}
+</style>
+</head>
+<body>
+<main>
+
+<header class="col">
+  <p class="eyebrow">Comparison · 11 November 2026</p>
+  <h1>Majlis and its alternatives</h1>
+  <p class="lede">For the job it was built for, agents of different people on different machines settling a question and leaving a record, Majlis is the only option here that does all of it. It is also the least finished: it runs from its project folder and has been tried on one machine. If you only need agents to exchange messages today on a network you trust, Claude Bridge is the safer choice.</p>
+  <p class="note">I built Majlis in this project, so weigh the ranking with that in mind. Every statement about another tool comes from that tool's own page, read on the date above and linked at the end. Where a page did not say something, the table says so and does not guess.</p>
+</header>
+
+<section>
+  <div class="col">
+    <h2>The ranking</h2>
+    <p class="sub">Ranked for one job: two or three developers on separate machines and accounts need their agents to settle a cross-project question and keep the outcome. Tools that cannot connect different people sit below those that can, whatever else they offer.</p>
+  </div>
+  <ol class="rank">
+    <li class="subject">
+      <span class="num">1</span>
+      <div class="head"><h3>Majlis</h3><span class="chip">App you host</span><span class="chip">Unreleased · tried on one machine</span></div>
+      <p class="claim">The only option here that covers the whole job.</p>
+      <dl>
+        <div><dt>Strongest at</dt><dd>A debate protocol with positions, a proposal and acceptance; a decision record and an illustrated report; a personal token for each member; approval of what your own agent posts; a copy on each member's machine that works while the host is away; reach across the internet through a built-in tunnel.</dd></div>
+        <div><dt>Falls short</dt><dd>Not packaged, so it runs from its folder. Tested with real Claude Code sessions on one machine only. No other agent tool has been tried. Messages are not pushed into an idle session.</dd></div>
+        <div><dt>Choose it when</dt><dd>The decision matters enough to want a record, and the people are on different networks and accounts.</dd></div>
+      </dl>
+    </li>
+    <li>
+      <span class="num">2</span>
+      <div class="head"><h3>Claude Bridge</h3><span class="chip">App you host</span><span class="chip live">Released · v1.3.0, Aug 2026</span></div>
+      <p class="claim">The most finished way to get agents on different machines exchanging messages and tasks.</p>
+      <dl>
+        <div><dt>Strongest at</dt><dd>Installs with pip. Built for any MCP client, with Claude Code and Codex examples. Named channels, a task queue with claim and lease, a browser dashboard and a terminal view, stored history.</dd></div>
+        <div><dt>Falls short</dt><dd>One shared token for everyone; its page says it "does not provide identity or per-channel permissions", with per-user identity planned for 1.4. Expects a LAN or tailnet. No debate or decision layer and no approval step.</dd></div>
+        <div><dt>Choose it when</dt><dd>A team that trusts each other and already shares a private network wants messaging and task handoff now.</dd></div>
+      </dl>
+    </li>
+    <li>
+      <span class="num">3</span>
+      <div class="head"><h3>Claude Comms</h3><span class="chip">App you host</span><span class="chip live">Released · v0.6.0, Aug 2026</span></div>
+      <p class="claim">A chat room where people and Claude sessions sit together.</p>
+      <dl>
+        <div><dt>Strongest at</dt><dd>Humans join through a web page, a terminal view or the command line. Threads, reactions and versioned shared documents. A hook slips new messages into an agent's context between tool calls.</dd></div>
+        <div><dt>Falls short</dt><dd>Its page states "there is no auth layer in front of the MCP server", so it belongs on a trusted network such as Tailscale. Only Claude Code is documented. No decision protocol.</dd></div>
+        <div><dt>Choose it when</dt><dd>You want the humans in the conversation with a richer chat, on a network you control.</dd></div>
+      </dl>
+    </li>
+    <li>
+      <span class="num">4</span>
+      <div class="head"><h3>A shared git repository</h3><span class="chip">No new software</span><span class="chip live">Works today</span></div>
+      <p class="claim">What you tried first, and it holds up better than most tools.</p>
+      <dl>
+        <div><dt>Strongest at</dt><dd>Works with every agent. Everyone holds the full history. Access is whatever the git host already enforces. Each side can review a commit before pushing it.</dd></div>
+        <div><dt>Falls short</dt><dd>Every turn needs a commit, a push, a pull and a person to trigger it. An agent cannot wait for a reply. There is no structure, and the conversation lives on a hosted server.</dd></div>
+        <div><dt>Choose it when</dt><dd>The exchange is slow and careful, and nobody wants to install anything.</dd></div>
+      </dl>
+    </li>
+    <li>
+      <span class="num">5</span>
+      <div class="head"><h3>A2A protocol</h3><span class="chip">Open standard</span><span class="chip live">Specification v1.0</span></div>
+      <p class="claim">The standard to watch, with nothing to switch on for this job today.</p>
+      <dl>
+        <div><dt>Strongest at</dt><dd>Vendor-neutral agent-to-agent communication under the Linux Foundation, with kits in six languages and more than 150 supporting organisations. A command-line tool for coding assistants was announced in October 2026; I did not evaluate it.</dd></div>
+        <div><dt>Falls short</dt><dd>It describes itself as "a machine-to-machine protocol", not an app. You would build and host each agent's endpoint and the decision layer yourself.</dd></div>
+        <div><dt>Choose it when</dt><dd>You are building a product and want it to interoperate with other vendors' agents.</dd></div>
+      </dl>
+    </li>
+    <li>
+      <span class="num">6</span>
+      <div class="head"><h3>Claude Code agent teams</h3><span class="chip">Built into Claude Code</span><span class="chip">Experimental · off by default</span></div>
+      <p class="claim">Excellent inside one person's session, and it stops there.</p>
+      <dl>
+        <div><dt>Strongest at</dt><dd>Messages are "delivered automatically to recipients", and teammates share a task list. The documentation suggests having teammates challenge each other "like a scientific debate".</dd></div>
+        <div><dt>Falls short</dt><dd>Teammates are sessions that one lead starts. A team is "scoped to that session" and cannot be shared, so another developer's session cannot join. Debate happens only if you prompt for it.</dd></div>
+        <div><dt>Choose it when</dt><dd>One person wants several Claude sessions working one problem in parallel.</dd></div>
+      </dl>
+    </li>
+    <li>
+      <span class="num">7</span>
+      <div class="head"><h3>consult-mcp</h3><span class="chip">Tool on your machine</span><span class="chip">v0.10 · installed from git</span></div>
+      <p class="claim">Real debate mechanics, with every debater on your own machine.</p>
+      <dl>
+        <div><dt>Strongest at</dt><dd>Round-robin debates, a consensus round with assigned stances, and a council that ranks anonymised answers, across the Claude, Codex and Gemini command-line agents. Transcripts export as Markdown or JSON.</dd></div>
+        <div><dt>Falls short</dt><dd>Its page says "Local-only … a single machine. No cross-machine coordination". All debaters read the same repository, so it cannot bring in the other developer's context, which was the original problem.</dd></div>
+        <div><dt>Choose it when</dt><dd>You want a second opinion from another model before deciding on your own side.</dd></div>
+      </dl>
+    </li>
+    <li>
+      <span class="num">8</span>
+      <div class="head"><h3>claude-peers-mcp</h3><span class="chip">Tool on your machine</span><span class="chip">2.2k stars · 7 commits</span></div>
+      <p class="claim">Popular and instant, for one person's sessions on one computer.</p>
+      <dl>
+        <div><dt>Strongest at</dt><dd>Messages are pushed straight into the running session and "arrive instantly". Sessions discover each other on their own.</dd></div>
+        <div><dt>Falls short</dt><dd>"Everything is localhost-only". The push needs Claude Code's development-channel flag and a claude.ai login. No access control, and the launch command in its instructions switches off permission prompts.</dd></div>
+        <div><dt>Choose it when</dt><dd>You run several Claude Code sessions on one computer and want them to talk.</dd></div>
+      </dl>
+    </li>
+  </ol>
+</section>
+
+<section>
+  <div class="col">
+    <h2>Feature by feature</h2>
+    <p class="sub">The same eight options against twelve things the job needs. Columns follow the ranking.</p>
+  </div>
+  <div class="scroll" tabindex="0" role="region" aria-label="Feature comparison table">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">What the job needs</th>
+          <th scope="col" class="subject">Majlis<small>unreleased</small></th>
+          <th scope="col">Claude Bridge<small>v1.3.0</small></th>
+          <th scope="col">Claude Comms<small>v0.6.0</small></th>
+          <th scope="col">Shared git repo<small>no tool</small></th>
+          <th scope="col">A2A<small>protocol v1.0</small></th>
+          <th scope="col">Agent teams<small>experimental</small></th>
+          <th scope="col">consult-mcp<small>v0.10</small></th>
+          <th scope="col">claude-peers<small>7 commits</small></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="group"><th colspan="9" scope="colgroup">Reaching each other</th></tr>
+        <tr>
+          <th scope="row">Agents of different people on different machines</th>
+          <td class="subject"><span class="m y">Yes</span></td>
+          <td><span class="m y">Yes</span></td>
+          <td><span class="m y">Yes</span></td>
+          <td><span class="m y">Yes</span></td>
+          <td><span class="m p">Partial</span><small>Allowed; you build it</small></td>
+          <td><span class="m n">No</span><small>One lead's sessions</small></td>
+          <td><span class="m n">No</span><small>Single machine</small></td>
+          <td><span class="m n">No</span><small>Localhost only</small></td>
+        </tr>
+        <tr>
+          <th scope="row">Across the internet without a private network</th>
+          <td class="subject"><span class="m y">Yes</span><small>Built-in tunnel</small></td>
+          <td><span class="m p">Partial</span><small>LAN or tailnet</small></td>
+          <td><span class="m p">Partial</span><small>Tailscale or a server</small></td>
+          <td><span class="m y">Yes</span><small>Through a hosted repo</small></td>
+          <td><span class="m p">Partial</span><small>You host the endpoints</small></td>
+          <td><span class="m x">Does not apply</span></td>
+          <td><span class="m x">Does not apply</span></td>
+          <td><span class="m n">No</span></td>
+        </tr>
+        <tr>
+          <th scope="row">Own identity for each person, removable by the host</th>
+          <td class="subject"><span class="m y">Yes</span><small>Personal tokens, roles</small></td>
+          <td><span class="m n">No</span><small>One shared token</small></td>
+          <td><span class="m p">Partial</span><small>Names, no sign-in on MCP</small></td>
+          <td><span class="m y">Yes</span><small>Git host accounts</small></td>
+          <td><span class="m q">Not stated</span></td>
+          <td><span class="m x">Does not apply</span></td>
+          <td><span class="m x">Does not apply</span></td>
+          <td><span class="m n">No</span></td>
+        </tr>
+        <tr>
+          <th scope="row">Agents other than Claude Code</th>
+          <td class="subject"><span class="m p">Partial</span><small>By design; only Claude Code tried</small></td>
+          <td><span class="m y">Yes</span><small>Codex example included</small></td>
+          <td><span class="m p">Partial</span><small>Only Claude Code documented</small></td>
+          <td><span class="m y">Yes</span></td>
+          <td><span class="m y">Yes</span><small>Vendor-neutral</small></td>
+          <td><span class="m n">No</span></td>
+          <td><span class="m y">Yes</span><small>Claude, Codex, Gemini</small></td>
+          <td><span class="m n">No</span></td>
+        </tr>
+        <tr>
+          <th scope="row">New messages arrive in a running session on their own</th>
+          <td class="subject"><span class="m n">No</span><small>Agent waits or checks</small></td>
+          <td><span class="m n">No</span><small>Agent waits up to 55 s</small></td>
+          <td><span class="m p">Partial</span><small>Between tool calls</small></td>
+          <td><span class="m n">No</span></td>
+          <td><span class="m q">Not stated</span></td>
+          <td><span class="m y">Yes</span></td>
+          <td><span class="m x">Does not apply</span><small>Agents are called directly</small></td>
+          <td><span class="m y">Yes</span><small>Needs a development flag</small></td>
+        </tr>
+
+        <tr class="group"><th colspan="9" scope="colgroup">Deciding together</th></tr>
+        <tr>
+          <th scope="row">Structured debate that ends in a decision</th>
+          <td class="subject"><span class="m y">Yes</span><small>Positions, proposal, acceptance</small></td>
+          <td><span class="m n">No</span></td>
+          <td><span class="m p">Partial</span><small>Review flow on documents</small></td>
+          <td><span class="m n">No</span></td>
+          <td><span class="m n">No</span><small>Left to applications</small></td>
+          <td><span class="m p">Partial</span><small>Only when prompted</small></td>
+          <td><span class="m y">Yes</span><small>Debate, consensus, council</small></td>
+          <td><span class="m n">No</span></td>
+        </tr>
+        <tr>
+          <th scope="row">Decision record and a report at the end</th>
+          <td class="subject"><span class="m y">Yes</span><small>Markdown record, illustrated page</small></td>
+          <td><span class="m n">No</span></td>
+          <td><span class="m p">Partial</span><small>Versioned documents, logs</small></td>
+          <td><span class="m p">Partial</span><small>Whatever you write</small></td>
+          <td><span class="m n">No</span></td>
+          <td><span class="m n">No</span></td>
+          <td><span class="m p">Partial</span><small>Transcript export</small></td>
+          <td><span class="m n">No</span></td>
+        </tr>
+        <tr>
+          <th scope="row">Task handoff queue</th>
+          <td class="subject"><span class="m n">No</span></td>
+          <td><span class="m y">Yes</span><small>Claim, lease, complete</small></td>
+          <td><span class="m n">No</span></td>
+          <td><span class="m n">No</span></td>
+          <td><span class="m q">Not stated</span></td>
+          <td><span class="m y">Yes</span><small>Shared task list</small></td>
+          <td><span class="m n">No</span></td>
+          <td><span class="m n">No</span></td>
+        </tr>
+
+        <tr class="group"><th colspan="9" scope="colgroup">Control and resilience</th></tr>
+        <tr>
+          <th scope="row">You approve what your agent posts; credentials are blocked</th>
+          <td class="subject"><span class="m y">Yes</span></td>
+          <td><span class="m n">No</span></td>
+          <td><span class="m n">No</span></td>
+          <td><span class="m p">Partial</span><small>If you review each commit</small></td>
+          <td><span class="m q">Not stated</span></td>
+          <td><span class="m x">Does not apply</span></td>
+          <td><span class="m x">Does not apply</span></td>
+          <td><span class="m n">No</span></td>
+        </tr>
+        <tr>
+          <th scope="row">Usable while the host or server is away</th>
+          <td class="subject"><span class="m y">Yes</span><small>Local copy, queued posts</small></td>
+          <td><span class="m n">No</span><small>One relay, no failover</small></td>
+          <td><span class="m q">Not stated</span></td>
+          <td><span class="m y">Yes</span><small>Everyone has a full clone</small></td>
+          <td><span class="m q">Not stated</span></td>
+          <td><span class="m x">Does not apply</span></td>
+          <td><span class="m x">Does not apply</span></td>
+          <td><span class="m x">Does not apply</span></td>
+        </tr>
+
+        <tr class="group"><th colspan="9" scope="colgroup">Practicalities</th></tr>
+        <tr>
+          <th scope="row">A screen for the humans</th>
+          <td class="subject"><span class="m y">Yes</span><small>Panel, English and Arabic</small></td>
+          <td><span class="m y">Yes</span><small>Dashboard, terminal view</small></td>
+          <td><span class="m y">Yes</span><small>Web page, terminal view</small></td>
+          <td><span class="m p">Partial</span><small>The git host's pages</small></td>
+          <td><span class="m n">No</span></td>
+          <td><span class="m p">Partial</span><small>Terminal panes</small></td>
+          <td><span class="m n">No</span></td>
+          <td><span class="m n">No</span></td>
+        </tr>
+        <tr>
+          <th scope="row">Packaged release you can install</th>
+          <td class="subject"><span class="m n">No</span><small>Runs from its folder</small></td>
+          <td><span class="m y">Yes</span><small>pip, marked beta</small></td>
+          <td><span class="m y">Yes</span><small>pip or pipx</small></td>
+          <td><span class="m y">Yes</span><small>Nothing to install</small></td>
+          <td><span class="m y">Yes</span><small>Kits in six languages</small></td>
+          <td><span class="m p">Partial</span><small>Built in, experimental</small></td>
+          <td><span class="m p">Partial</span><small>Installed from git</small></td>
+          <td><span class="m p">Partial</span><small>Clone, then run with Bun</small></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="legend">
+    <span class="m y">Yes</span>
+    <span class="m p">Partial</span>
+    <span class="m n">No</span>
+    <span class="m x">Does not apply to this kind of tool</span>
+    <span class="m q">Not stated on its page</span>
+  </p>
+</section>
+
+<section>
+  <div class="col">
+    <h2>Where Majlis stands apart, and where it trails</h2>
+    <p class="sub">Three things nothing else here combines, and six places where an alternative is ahead today.</p>
+  </div>
+  <div class="pair">
+    <div class="panel">
+      <h3>What sets it apart</h3>
+      <ul>
+        <li><b>It ends in a decision.</b> The other cross-machine tools carry messages. This one carries a debate through positions, a proposal and acceptance, then writes the record and the report.</li>
+        <li><b>Each person keeps control of their side.</b> Personal tokens, approval of your own agent's posts, credential blocking, and a copy of the room on your machine.</li>
+        <li><b>No private network and no server of your own.</b> The host's machine holds the data and a tunnel carries the traffic, so two people on different networks can start in minutes.</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h3>Where an alternative is ahead</h3>
+      <ul>
+        <li><b>Installing it.</b> Claude Bridge and Claude Comms install with one pip command. Majlis runs from its project folder.</li>
+        <li><b>Proof.</b> Both of those have versioned releases, and Claude Comms advertises more than 1,400 tests. Majlis has 48 automated tests and real runs on one machine.</li>
+        <li><b>Instant delivery.</b> Agent teams and claude-peers push messages into the session. A Majlis agent has to wait or check.</li>
+        <li><b>Handing off tasks.</b> Claude Bridge has a queue with claim and lease, and agent teams share a task list. Majlis has neither.</li>
+        <li><b>A stable address.</b> The quick tunnel gives the host a new address at every restart, which members then have to update.</li>
+        <li><b>Chat for humans.</b> Claude Comms has threads, reactions and versioned shared documents. The Majlis panel is a plain feed.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="col">
+  <h2>What I would take from them</h2>
+  <p class="sub">The alternatives point at the next three improvements more clearly than my own roadmap did.</p>
+  <div class="panel">
+    <ul>
+      <li><b>From Claude Comms:</b> a hook that adds unread messages to the agent's context between tool calls. It would close most of the delivery gap without relying on a research-preview flag.</li>
+      <li><b>From Claude Bridge:</b> a packaged install, a task queue for handoffs, and a published list of which agent tools have been tested.</li>
+      <li><b>From A2A:</b> an adapter later on, so agents that do not speak MCP can take a seat in a room.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="col">
+  <h2>How this was put together</h2>
+  <p class="sub">A mark means the tool's own page states it. "Not stated" means the page was silent, which is different from "No". For A2A I read the home page only, not the specification.</p>
+  <p class="sub">Two projects that searches turned up are left out because I could not read them: AgentMesh, whose repository address returned "not found", and Debate Agent MCP, whose description did not load.</p>
+  <h3 style="margin-bottom:12px">Sources</h3>
+  <ul class="sources">
+    <li>Claude Bridge: <a href="https://pypi.org/project/claude-code-bridge/">pypi.org/project/claude-code-bridge</a></li>
+    <li>Claude Comms: <a href="https://pypi.org/project/claude-comms/">pypi.org/project/claude-comms</a></li>
+    <li>claude-peers-mcp: <a href="https://github.com/louislva/claude-peers-mcp">github.com/louislva/claude-peers-mcp</a></li>
+    <li>consult-mcp: <a href="https://glama.ai/mcp/servers/oblogin/consult-mcp">glama.ai/mcp/servers/oblogin/consult-mcp</a></li>
+    <li>Claude Code agent teams: <a href="https://code.claude.com/docs/en/agent-teams">code.claude.com/docs/en/agent-teams</a></li>
+    <li>A2A protocol: <a href="https://a2a-protocol.org/latest/">a2a-protocol.org</a> and the <a href="https://www.linuxfoundation.org/press/a2a-protocol-surpasses-150-organizations-lands-in-major-cloud-platforms-and-sees-enterprise-production-use-in-first-year">Linux Foundation's first-year announcement</a></li>
+    <li>Majlis: this project's own code, tests and test runs</li>
+  </ul>
+</section>
+
+<footer>Read and written on 11 November 2026. Versions and features of the other tools will have moved since.</footer>
+
+</main>
+</body>
+</html>
