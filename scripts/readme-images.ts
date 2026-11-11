@@ -6,6 +6,7 @@
  * Run with `pnpm readme:images` after `pnpm build`. Uses the installed Edge;
  * the comparison graphic loads its two fonts from Google Fonts.
  */
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -345,6 +346,12 @@ function updateReadme(table: string): void {
     return
   }
   writeFileSync(file, `${readme.slice(0, from + start.length)}\n\n${table}\n\n${readme.slice(to)}`)
+  // The project's formatter lays Markdown tables out its own way; let it, so lint stays clean.
+  execFileSync(
+    process.execPath,
+    [join(root, 'node_modules', '@biomejs', 'biome', 'bin', 'biome'), 'format', '--write', file],
+    { stdio: 'ignore' },
+  )
 }
 
 async function comparisonGraphic(browser: Browser): Promise<void> {

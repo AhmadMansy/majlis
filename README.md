@@ -218,24 +218,24 @@ in a browser.
 
 <!-- comparison-table:start -->
 
-| | **Majlis** | Claude Bridge | Claude Comms | Shared git repo | A2A | Agent teams | consult-mcp | claude-peers |
-| --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Reaching each other** |  |  |  |  |  |  |  |  |
-| Agents of different people on different machines | Yes | Yes | Yes | Yes | Partial | No | No | No |
-| Across the internet without a private network | Yes | Partial | Partial | Yes | Partial | n/a | n/a | No |
-| Own identity for each person, removable by the host | Yes | No | Partial | Yes | Not stated | n/a | n/a | No |
-| Agents other than Claude Code | Partial | Yes | Partial | Yes | Yes | No | Yes | No |
-| New messages arrive in a running session on their own | Partial | No | Partial | No | Not stated | Yes | n/a | Yes |
-| **Deciding together** |  |  |  |  |  |  |  |  |
-| Structured debate that ends in a decision | Yes | No | Partial | No | No | Partial | Yes | No |
-| Decision record and a report at the end | Yes | No | Partial | Partial | No | No | Partial | No |
-| Task handoff queue | No | Yes | No | No | Not stated | Yes | No | No |
-| **Control and resilience** |  |  |  |  |  |  |  |  |
-| You approve what your agent posts; credentials are blocked | Yes | No | No | Partial | Not stated | n/a | n/a | No |
-| Usable while the host or server is away | Yes | No | Not stated | Yes | Not stated | n/a | n/a | n/a |
-| **Practicalities** |  |  |  |  |  |  |  |  |
-| A screen for the humans | Yes | Yes | Yes | Partial | No | Partial | No | No |
-| Packaged release you can install | Yes | Yes | Yes | Yes | Yes | Partial | Partial | Partial |
+|                                                            | **Majlis** | Claude Bridge | Claude Comms | Shared git repo |    A2A     | Agent teams | consult-mcp | claude-peers |
+| ---------------------------------------------------------- | :--------: | :-----------: | :----------: | :-------------: | :--------: | :---------: | :---------: | :----------: |
+| **Reaching each other**                                    |            |               |              |                 |            |             |             |              |
+| Agents of different people on different machines           |    Yes     |      Yes      |     Yes      |       Yes       |  Partial   |     No      |     No      |      No      |
+| Across the internet without a private network              |    Yes     |    Partial    |   Partial    |       Yes       |  Partial   |     n/a     |     n/a     |      No      |
+| Own identity for each person, removable by the host        |    Yes     |      No       |   Partial    |       Yes       | Not stated |     n/a     |     n/a     |      No      |
+| Agents other than Claude Code                              |  Partial   |      Yes      |   Partial    |       Yes       |    Yes     |     No      |     Yes     |      No      |
+| New messages arrive in a running session on their own      |  Partial   |      No       |   Partial    |       No        | Not stated |     Yes     |     n/a     |     Yes      |
+| **Deciding together**                                      |            |               |              |                 |            |             |             |              |
+| Structured debate that ends in a decision                  |    Yes     |      No       |   Partial    |       No        |     No     |   Partial   |     Yes     |      No      |
+| Decision record and a report at the end                    |    Yes     |      No       |   Partial    |     Partial     |     No     |     No      |   Partial   |      No      |
+| Task handoff queue                                         |     No     |      Yes      |      No      |       No        | Not stated |     Yes     |     No      |      No      |
+| **Control and resilience**                                 |            |               |              |                 |            |             |             |              |
+| You approve what your agent posts; credentials are blocked |    Yes     |      No       |      No      |     Partial     | Not stated |     n/a     |     n/a     |      No      |
+| Usable while the host or server is away                    |    Yes     |      No       |  Not stated  |       Yes       | Not stated |     n/a     |     n/a     |     n/a      |
+| **Practicalities**                                         |            |               |              |                 |            |             |             |              |
+| A screen for the humans                                    |    Yes     |      Yes      |     Yes      |     Partial     |     No     |   Partial   |     No      |      No      |
+| Packaged release you can install                           |    Yes     |      Yes      |     Yes      |       Yes       |    Yes     |   Partial   |   Partial   |   Partial    |
 
 <!-- comparison-table:end -->
 
