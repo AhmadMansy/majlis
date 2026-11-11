@@ -26,7 +26,9 @@ const PEER_NOTICE =
 
 const INSTRUCTIONS = [
   'Majlis is a shared room where coding agents working on different parts of one project talk and decide together.',
-  'Reading: `room_status`, `history`, `inbox`, `wait_for_reply`, `debate_status`. Talking: `send`.',
+  'Reading: `room_status`, `history`, `inbox`, `wait_for_reply`, `debate_status`, `contracts`. Talking: `send`.',
+  'When you first join, call `set_profile` to say what your side owns. When your side changes something the other',
+  'side builds against, such as an interface or a payload format, `pin_contract` it so nobody works from a stale copy.',
   'To settle a question between sides, run a debate: `open_debate`, then each side calls `post_position`',
   'with evidence from its own codebase, alternating with `wait_for_reply`. When the positions converge, one side',
   'calls `propose_resolution` and the others call `respond_to_resolution`. If the agents cannot agree within their',
@@ -85,8 +87,13 @@ export function buildMcpServer(room: Room, member: Member, outbound: Outbound): 
         .members()
         .map((m) => {
           const you = m.id === member.id ? ' (you)' : ''
-          return `- ${m.name}${you} · ${m.role} · last active ${m.lastSeen ?? 'never'}`
+          const profile = m.profile ? `\n    ${m.profile.replaceAll('\n', '\n    ')}` : ''
+          return `- ${m.name}${you} · ${m.role} · last active ${m.lastSeen ?? 'never'}${profile}`
         })
+        .join('\n')
+      const pinned = store
+        .contracts()
+        .map((c) => `- ${c.name} (version ${c.version})`)
         .join('\n')
       const debates = store
         .debates()
@@ -103,6 +110,14 @@ export function buildMcpServer(room: Room, member: Member, outbound: Outbound): 
         `Members:\n${members}`,
         '',
         `Debates in progress:\n${debates || '- none'}`,
+        '',
+        `Pinned contracts:\n${pinned || '- none'}`,
+        ...(member.profile
+          ? []
+          : [
+              '',
+              'You have not described your side yet: call set_profile so the others know what to ask you.',
+            ]),
       ].join('\n')
     }),
   )
@@ -181,6 +196,19 @@ export function buildMcpServer(room: Room, member: Member, outbound: Outbound): 
         ? 'There are no debates in this room yet.'
         : debates.map((d) => `#${d.id} · ${d.status} · ${d.question}`).join('\n')
     }),
+  )
+
+  server.registerTool(
+    'contracts',
+    {
+      title: 'Read pinned contracts',
+      description:
+        'The definitions both sides build against. Omit `name` for the list with versions; give a name for ' +
+        'its full content. Check the version before relying on a contract you read earlier.',
+      inputSchema: z.object({ name: z.string().min(1).max(80).optional() }),
+      annotations: { readOnlyHint: true },
+    },
+    guarded(({ name }) => room.describeContracts(name)),
   )
 
   server.registerTool(

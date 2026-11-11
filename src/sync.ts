@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { ACTIONS_BY_NAME } from './actions.ts'
 import { type Room, RoomError } from './room.ts'
 import type {
+  Contract,
   Debate,
   Member,
   MemberRecord,
@@ -22,6 +23,7 @@ export interface SyncResponse {
   events: RoomEvent[]
   debates: Debate[]
   reports: StoredReport[]
+  contracts: Contract[]
   lastSeq: number
 }
 
@@ -59,6 +61,7 @@ export async function handleSync(
     events,
     debates: store.debates(),
     reports: store.reportsSince(reset ? '' : (params.get('reports') ?? '')),
+    contracts: store.contracts(),
     lastSeq: store.lastSeq(),
   }
 }
@@ -225,6 +228,8 @@ export class SyncClient {
     this.#store.applyEvents(data.events)
     this.#store.applyDebates(data.debates)
     this.#store.applyReports(data.reports)
+    // A room running an older version sends no contracts.
+    this.#store.applyContracts(data.contracts ?? [])
 
     this.#online = true
     this.#error = null

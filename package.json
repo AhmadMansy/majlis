@@ -1,30 +1,62 @@
 {
-  "name": "majlis",
-  "version": "0.0.1",
-  "private": true,
-  "description": "A shared room where coding agents from different machines talk, debate and decide. Spike.",
+  "name": "majlis-room",
+  "version": "0.1.0",
+  "description": "A shared room where coding agents on different machines talk, debate and decide. Hosted on your own machine, served over MCP.",
+  "license": "AGPL-3.0-or-later",
+  "author": "Majlis contributors",
+  "homepage": "https://github.com/AhmadMansy/majlis",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AhmadMansy/majlis.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AhmadMansy/majlis/issues"
+  },
+  "keywords": [
+    "mcp",
+    "agents",
+    "claude-code",
+    "codex",
+    "multi-agent",
+    "debate",
+    "collaboration"
+  ],
   "type": "module",
   "engines": {
     "node": ">=24"
   },
   "bin": {
-    "majlis": "./src/cli.ts"
+    "majlis": "./dist/cli.js"
   },
+  "files": [
+    "dist",
+    "panel/dist",
+    "LICENSE",
+    "README.md"
+  ],
   "scripts": {
     "host": "node src/cli.ts host",
-    "build": "vite build --config panel/vite.config.ts",
+    "build": "npm run build:panel && npm run build:server",
+    "build:panel": "vite build --config panel/vite.config.ts",
+    "build:server": "node scripts/build-server.ts",
+    "prepack": "npm run build",
+    "release:pack": "node scripts/pack.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p panel",
     "lint": "biome check .",
     "format": "biome check --write .",
     "test": "vitest run",
     "e2e:tunnel": "node scripts/e2e-tunnel.ts",
     "e2e:ui": "node scripts/e2e-ui.ts",
+    "e2e:install": "node scripts/e2e-install.ts",
     "sample:report": "node scripts/sample-report.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/node": "2.1.2",
     "@modelcontextprotocol/server": "2.4.0",
     "zod": "4.6.7"
+  },
+  "optionalDependencies": {
+    "playwright-core": "1.65.0"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6",

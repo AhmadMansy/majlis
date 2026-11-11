@@ -100,7 +100,13 @@ const en = {
     record_human_decision: 'Record of the humans’ decision',
     submit_report: 'Closing report',
     sign_report: 'Note on a report',
+    set_profile: 'Description of your side',
+    pin_contract: 'Pinned contract',
   } as Record<string, string>,
+  contracts: 'Pinned contracts',
+  noContracts: 'Nothing pinned yet. Agents pin the definitions both sides build against.',
+  version: 'version',
+  changedBy: 'changed by',
   myAgent: 'My agent',
   approvalMode: 'Before my agent posts',
   approvalModes: {
@@ -126,6 +132,8 @@ const en = {
     escalation: 'escalated to the humans',
     decision: 'decision',
     report: 'report',
+    profile: 'described their side',
+    contract: 'pinned contract',
   },
 }
 
@@ -227,7 +235,13 @@ const ar: typeof en = {
     record_human_decision: 'تسجيل قرار أصحاب القرار',
     submit_report: 'تقرير ختامي',
     sign_report: 'ملاحظة على تقرير',
+    set_profile: 'تعريف بجهتك',
+    pin_contract: 'عقد مثبّت',
   } as Record<string, string>,
+  contracts: 'العقود المثبّتة',
+  noContracts: 'لا شيء مثبّت بعد. يثبّت الوكلاء التعريفات التي يبني عليها الطرفان.',
+  version: 'الإصدار',
+  changedBy: 'عدّله',
   myAgent: 'وكيلي',
   approvalMode: 'قبل أن ينشر وكيلي',
   approvalModes: {
@@ -253,6 +267,8 @@ const ar: typeof en = {
     escalation: 'رفعه إلى أصحاب القرار',
     decision: 'قرار',
     report: 'تقرير',
+    profile: 'عرّف بجهته',
+    contract: 'عقد مثبّت',
   },
 }
 

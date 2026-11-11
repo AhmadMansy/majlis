@@ -14,12 +14,26 @@ export type EventKind =
   | 'escalation'
   | 'decision'
   | 'report'
+  | 'profile'
+  | 'contract'
 
 export interface Member {
   id: string
   name: string
   role: Role
   lastSeen: string | null
+  /** What this member's agent says it owns and knows, so peers know what to ask it. */
+  profile: string
+}
+
+/** A shared definition both sides build against, such as an interface or payload format. */
+export interface Contract {
+  name: string
+  content: string
+  note: string
+  version: number
+  updatedBy: string
+  updatedAt: string
 }
 
 export interface RoomEvent {
@@ -162,6 +176,7 @@ export interface MemberRecord {
   role: Role
   active: boolean
   createdAt: string
+  profile: string
 }
 
 interface Waiter {
@@ -252,6 +267,14 @@ export class RoomStore {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS contracts (
+        name TEXT PRIMARY KEY COLLATE NOCASE,
+        content TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        version INTEGER NOT NULL,
+        updated_by TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS acts (
         id TEXT PRIMARY KEY,
         member_id TEXT NOT NULL,
@@ -276,6 +299,15 @@ export class RoomStore {
     }
     if (!columns.has('debate_id')) this.#db.exec('ALTER TABLE events ADD COLUMN debate_id INTEGER')
     if (!columns.has('data')) this.#db.exec('ALTER TABLE events ADD COLUMN data TEXT')
+    const memberColumns = new Set(
+      this.#db
+        .prepare('PRAGMA table_info(members)')
+        .all()
+        .map((column) => String(column.name)),
+    )
+    if (!memberColumns.has('profile')) {
+      this.#db.exec(`ALTER TABLE members ADD COLUMN profile TEXT NOT NULL DEFAULT ''`)
+    }
     this.#db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`)
   }
 
@@ -294,7 +326,7 @@ export class RoomStore {
         'INSERT INTO members (id, name, role, token_hash, created_at) VALUES (?, ?, ?, ?, ?)',
       )
       .run(id, name, role, hashToken(token), now())
-    return { member: { id, name, role, lastSeen: null }, token }
+    return { member: { id, name, role, lastSeen: null, profile: '' }, token }
   }
 
   /** Replaces a member's token, invalidating the old one. Returns undefined for an unknown name. */
@@ -324,7 +356,9 @@ export class RoomStore {
   memberByName(name: string): Member | undefined {
     return toMember(
       this.#db
-        .prepare('SELECT id, name, role, last_seen FROM members WHERE name = ? AND revoked = 0')
+        .prepare(
+          'SELECT id, name, role, last_seen, profile FROM members WHERE name = ? AND revoked = 0',
+        )
         .get(name),
     )
   }
@@ -338,7 +372,7 @@ export class RoomStore {
     return toMember(
       this.#db
         .prepare(
-          'SELECT id, name, role, last_seen FROM members WHERE token_hash = ? AND revoked = 0',
+          'SELECT id, name, role, last_seen, profile FROM members WHERE token_hash = ? AND revoked = 0',
         )
         .get(hashToken(token)),
     )
@@ -347,7 +381,9 @@ export class RoomStore {
   memberById(id: string): Member | undefined {
     return toMember(
       this.#db
-        .prepare('SELECT id, name, role, last_seen FROM members WHERE id = ? AND revoked = 0')
+        .prepare(
+          'SELECT id, name, role, last_seen, profile FROM members WHERE id = ? AND revoked = 0',
+        )
         .get(id),
     )
   }
@@ -362,7 +398,7 @@ export class RoomStore {
     return toMember(
       this.#db
         .prepare(
-          `SELECT id, name, role, last_seen FROM members WHERE role = 'host' AND revoked = 0 ORDER BY created_at LIMIT 1`,
+          `SELECT id, name, role, last_seen, profile FROM members WHERE role = 'host' AND revoked = 0 ORDER BY created_at LIMIT 1`,
         )
         .get(),
     )
@@ -371,7 +407,7 @@ export class RoomStore {
   members(): Member[] {
     return this.#db
       .prepare(
-        'SELECT id, name, role, last_seen FROM members WHERE revoked = 0 ORDER BY created_at',
+        'SELECT id, name, role, last_seen, profile FROM members WHERE revoked = 0 ORDER BY created_at',
       )
       .all()
       .map((row) => toMember(row))
@@ -696,6 +732,15 @@ export class RoomStore {
     return next
   }
 
+  /** The newest event a hook has already told the owner's agent about. */
+  hookSeq(): number {
+    return this.#value<number>('hookSeq', 0)
+  }
+
+  setHookSeq(seq: number): void {
+    this.#setValue('hookSeq', seq)
+  }
+
   mirrorConfig(): MirrorConfig | undefined {
     return this.#value<MirrorConfig | undefined>('mirror', undefined)
   }
@@ -786,7 +831,9 @@ export class RoomStore {
 
   allMembers(): MemberRecord[] {
     return this.#db
-      .prepare('SELECT id, name, role, revoked, created_at FROM members ORDER BY created_at')
+      .prepare(
+        'SELECT id, name, role, revoked, created_at, profile FROM members ORDER BY created_at',
+      )
       .all()
       .map((row) => ({
         id: String(row.id),
@@ -794,7 +841,46 @@ export class RoomStore {
         role: (toMember({ ...row, last_seen: null })?.role ?? 'member') as Role,
         active: Number(row.revoked) === 0,
         createdAt: String(row.created_at),
+        profile: row.profile == null ? '' : String(row.profile),
       }))
+  }
+
+  // ── Profiles and pinned contracts ──────────────────────────────────────
+
+  setProfile(memberId: string, profile: string): void {
+    this.#db.prepare('UPDATE members SET profile = ? WHERE id = ?').run(profile, memberId)
+  }
+
+  /** Pins a contract, or replaces it and raises its version. */
+  pinContract(input: { name: string; content: string; note: string; updatedBy: string }): Contract {
+    const version = (this.contract(input.name)?.version ?? 0) + 1
+    this.#db
+      .prepare(
+        `INSERT INTO contracts (name, content, note, version, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(name) DO UPDATE SET content = excluded.content, note = excluded.note,
+           version = excluded.version, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+      )
+      .run(input.name, input.content, input.note, version, input.updatedBy, now())
+    return this.contract(input.name) as Contract
+  }
+
+  contract(name: string): Contract | undefined {
+    const row = this.#db.prepare('SELECT * FROM contracts WHERE name = ? COLLATE NOCASE').get(name)
+    return row ? toContract(row) : undefined
+  }
+
+  contracts(): Contract[] {
+    return this.#db.prepare('SELECT * FROM contracts ORDER BY name').all().map(toContract)
+  }
+
+  applyContracts(contracts: Contract[]): void {
+    const upsert = this.#db.prepare(
+      `INSERT OR REPLACE INTO contracts (name, content, note, version, updated_by, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    for (const c of contracts) {
+      upsert.run(c.name, c.content, c.note, c.version, c.updatedBy, c.updatedAt)
+    }
   }
 
   /** A short fingerprint of one event, used to check that a copy and the room share the same history. */
@@ -814,8 +900,9 @@ export class RoomStore {
   /** Makes the copy's member list match the room's. Local tokens and read positions are kept. */
   applyMembers(members: MemberRecord[]): void {
     const upsert = this.#db.prepare(
-      `INSERT INTO members (id, name, role, token_hash, revoked, created_at) VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET name = excluded.name, role = excluded.role, revoked = excluded.revoked`,
+      `INSERT INTO members (id, name, role, token_hash, revoked, created_at, profile) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET name = excluded.name, role = excluded.role,
+         revoked = excluded.revoked, profile = excluded.profile`,
     )
     for (const member of members) {
       // Other members' tokens never leave the host; the placeholder can match no real token.
@@ -827,6 +914,8 @@ export class RoomStore {
         placeholder,
         member.active ? 0 : 1,
         member.createdAt,
+        // A room running an older version sends no profile.
+        member.profile ?? '',
       )
     }
   }
@@ -916,7 +1005,9 @@ export class RoomStore {
 
   /** Empties the copied history when it no longer matches the room, so it can be fetched again. */
   resetCopy(meId: string): void {
-    this.#db.exec('DELETE FROM events; DELETE FROM debates; DELETE FROM reports;')
+    this.#db.exec(
+      'DELETE FROM events; DELETE FROM debates; DELETE FROM reports; DELETE FROM contracts;',
+    )
     this.#db.prepare('DELETE FROM members WHERE id != ?').run(meId)
     this.#db.prepare('UPDATE members SET cursor = 0 WHERE id = ?').run(meId)
   }
@@ -976,6 +1067,18 @@ function toMember(row: Row | undefined): Member | undefined {
     name: String(row.name),
     role,
     lastSeen: row.last_seen == null ? null : String(row.last_seen),
+    profile: row.profile == null ? '' : String(row.profile),
+  }
+}
+
+function toContract(row: Row): Contract {
+  return {
+    name: String(row.name),
+    content: String(row.content),
+    note: String(row.note),
+    version: Number(row.version),
+    updatedBy: String(row.updated_by),
+    updatedAt: String(row.updated_at),
   }
 }
 

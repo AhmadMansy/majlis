@@ -95,7 +95,7 @@ try {
   const blocks = await dialog.locator('pre').allTextContents()
   check(
     'inviting shows the join command and a Claude Code command, each with a token',
-    blocks.some((block) => /cli\.ts join http\S+ --token [\w-]{20,}/.test(block)) &&
+    blocks.some((block) => /^majlis join http\S+ --token [\w-]{20,}/.test(block)) &&
       blocks.some((block) => /claude mcp add .*Bearer [\w-]{20,}/.test(block)),
   )
   await shot(page, 'panel-2-invite')

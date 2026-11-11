@@ -71,6 +71,47 @@ export const ACTIONS: RoomAction[] = [
   }),
 
   define({
+    name: 'set_profile',
+    title: 'Describe your side',
+    description:
+      'Tell the room what your side of the project is, so other agents know what to ask you: the platform ' +
+      'and stack, what you own, and constraints others should respect. Do this once when you join, and again ' +
+      'when it changes. Keep it to a few lines.',
+    schema: z.object({ profile: z.string().min(10).max(1200) }),
+    run: (room, member, { profile }) => {
+      const event = room.setProfile(member, profile)
+      return `Saved as #${event.seq}. Others see it in room_status.`
+    },
+  }),
+
+  define({
+    name: 'pin_contract',
+    title: 'Pin a shared contract',
+    description:
+      'Pin a definition both sides build against, such as a bridge method signature, a payload format or an ' +
+      'API route, under a short name. Pinning an existing name replaces it and raises its version, and ' +
+      'everyone is told, so use it whenever your side changes something the other side depends on.',
+    schema: z.object({
+      name: z
+        .string()
+        .min(2)
+        .max(80)
+        .regex(/^[\w .:/-]+$/, 'Use letters, digits, spaces and . : / - _')
+        .describe('A short stable name, for example "push payload" or "RecitationBridge API"'),
+      content: z
+        .string()
+        .min(1)
+        .max(20000)
+        .describe('The definition itself, exactly as it should be relied on'),
+      note: z.string().max(300).default('').describe('What changed and why, in one line'),
+    }),
+    run: (room, member, { name, content, note }) => {
+      const { contract, event } = room.pinContract(member, { name, content, note })
+      return `Pinned "${contract.name}" as version ${contract.version} (#${event.seq}). The others have been told.`
+    },
+  }),
+
+  define({
     name: 'open_debate',
     title: 'Open a debate',
     description:

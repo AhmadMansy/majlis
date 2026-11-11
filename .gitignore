@@ -4,3 +4,4 @@ dist/
 .tools/
 samples/
 *.log
+release/

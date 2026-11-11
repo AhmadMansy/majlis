@@ -10,6 +10,7 @@ import type { Outbound } from './outbound.ts'
 import { type DebateView, type Room, RoomError } from './room.ts'
 import type {
   ApprovalMode,
+  Contract,
   DebateStatus,
   Member,
   OutboxItem,
@@ -40,6 +41,7 @@ export interface AdminState {
     url: string
     publicUrl: string | null
   }>
+  contracts: Contract[]
   lastSeq: number
   /** Whether this panel belongs to the room's host or to a member's copy. */
   mode: 'host' | 'mirror'
@@ -235,6 +237,7 @@ export async function startAdminServer(options: AdminServerOptions): Promise<Adm
         url: `${room.urls.local}/r/${report.key}`,
         publicUrl: room.urls.public ? `${room.urls.public}/r/${report.key}` : null,
       })),
+      contracts: store.contracts(),
       lastSeq: store.lastSeq(),
     }
   }

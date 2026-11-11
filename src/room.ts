@@ -1,5 +1,6 @@
 import type {
   Action,
+  Contract,
   Debate,
   Decision,
   Member,
@@ -90,6 +91,8 @@ const KIND_LABEL: Record<RoomEvent['kind'], string> = {
   escalation: 'escalated to the humans',
   decision: 'DECISION',
   report: 'report',
+  profile: 'described their side',
+  contract: 'pinned contract',
 }
 
 /** One event as an agent reads it. */
@@ -539,6 +542,56 @@ export class Room {
       lines.push('', '## Dissent', '', ...dissent.map((n) => `- **${n.member}**: ${n.note}`))
     }
     return lines.join('\n')
+  }
+
+  // ── Profiles and pinned contracts ──────────────────────────────────────
+
+  /** Records what a member's agent says its side owns, and tells the others once. */
+  setProfile(member: Member, profile: string): RoomEvent {
+    this.#guardWrite(member, false)
+    this.#guardLength('The profile', profile)
+    this.store.setProfile(member.id, profile)
+    return this.store.append({ authorId: member.id, kind: 'profile', body: profile })
+  }
+
+  /** Pins or replaces a shared definition. Every change is announced, so no side builds on a stale one. */
+  pinContract(
+    member: Member,
+    input: { name: string; content: string; note: string },
+  ): { contract: Contract; event: RoomEvent } {
+    this.#guardWrite(member, false)
+    this.#guardLength('The contract', input.content)
+    const before = this.store.contract(input.name)
+    const contract = this.store.pinContract({ ...input, updatedBy: member.name })
+    const event = this.store.append({
+      authorId: member.id,
+      kind: 'contract',
+      body:
+        `${before ? 'Changed' : 'Pinned'} "${contract.name}" (version ${contract.version})` +
+        `${input.note ? `: ${input.note}` : '.'}\nRead it with the contracts tool before relying on it.`,
+      data: { name: contract.name, version: contract.version },
+    })
+    return { contract, event }
+  }
+
+  /** The pinned contracts as an agent reads them: the list, or one in full. */
+  describeContracts(name?: string): string {
+    if (name !== undefined) {
+      const contract = this.store.contract(name)
+      if (!contract) throw new RoomError(`There is no pinned contract named "${name}".`)
+      return (
+        `Contract "${contract.name}" · version ${contract.version} · last changed by ${contract.updatedBy} ` +
+        `on ${contract.updatedAt}${contract.note ? `\nNote: ${contract.note}` : ''}\n\n${contract.content}`
+      )
+    }
+    const contracts = this.store.contracts()
+    if (contracts.length === 0) return 'Nothing is pinned in this room yet.'
+    return contracts
+      .map(
+        (c) =>
+          `- ${c.name} · version ${c.version} · ${c.updatedBy}, ${c.updatedAt.slice(0, 10)}${c.note ? ` · ${c.note}` : ''}`,
+      )
+      .join('\n')
   }
 
   // ── Reports ────────────────────────────────────────────────────────────

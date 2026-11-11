@@ -27,7 +27,7 @@ export function connectInfo(url: string, token: string, offerCopy = false): Conn
       null,
       2,
     ),
-    join: offerCopy ? `node src/cli.ts join ${url} --token ${token}` : null,
+    join: offerCopy ? `majlis join ${url} --token ${token}` : null,
   }
 }
 

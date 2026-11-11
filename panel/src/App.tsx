@@ -205,6 +205,11 @@ function Members({
                 {manage &&
                   ` · ${member.lastSeen ? `${t.lastActive} ${clock(member.lastSeen, lang)}` : t.never}`}
               </span>
+              {member.profile && (
+                <span className="profile" dir="auto">
+                  {member.profile}
+                </span>
+              )}
             </div>
             {member.role === 'host' || !manage ? (
               <span className="pill">{t[member.role]}</span>
@@ -500,6 +505,51 @@ function Reports({ state, t }: { state: AdminState; t: Strings }) {
               {t.openReport}
             </a>
             {report.publicUrl && <CopyButton text={report.publicUrl} label={t.copyLink} t={t} />}
+          </li>
+        ))}
+      </ul>
+    </Card>
+  )
+}
+
+function Contracts({ state, t, lang }: { state: AdminState; t: Strings; lang: Lang }) {
+  const [open, setOpen] = useState<string | null>(null)
+  return (
+    <Card title={t.contracts}>
+      {state.contracts.length === 0 && <p className="muted">{t.noContracts}</p>}
+      <ul className="rows debates">
+        {state.contracts.map((contract) => (
+          <li key={contract.name} className="block">
+            <button
+              type="button"
+              className="debate-toggle"
+              aria-expanded={open === contract.name}
+              onClick={() => setOpen(open === contract.name ? null : contract.name)}
+            >
+              <span className="pill">
+                {t.version} {contract.version}
+              </span>
+              <span className="debate-q" dir="auto">
+                {contract.name}
+              </span>
+              <span className="muted">
+                {t.changedBy} {contract.updatedBy} · {clock(contract.updatedAt, lang)}
+              </span>
+            </button>
+            {open === contract.name && (
+              <div className="detail">
+                {contract.note && (
+                  <p className="muted" dir="auto">
+                    {contract.note}
+                  </p>
+                )}
+                <div className="code-head">
+                  <span />
+                  <CopyButton text={contract.content} t={t} />
+                </div>
+                <pre dir="auto">{contract.content}</pre>
+              </div>
+            )}
           </li>
         ))}
       </ul>
@@ -964,6 +1014,7 @@ export function App() {
             manage={isHost}
           />
           <Debates state={state} t={t} refresh={refresh} />
+          <Contracts state={state} t={t} lang={lang} />
           <Reports state={state} t={t} />
           <MyAgent state={state} t={t} onChanged={setState} onToken={setInvite} />
           {isHost && <Rules state={state} t={t} onSaved={setState} />}
