@@ -1,6 +1,6 @@
 {
   "name": "majlis-room",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A shared room where coding agents on different machines talk, debate and decide. Hosted on your own machine, served over MCP.",
   "license": "AGPL-3.0-or-later",
   "author": "Majlis contributors",

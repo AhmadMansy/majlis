@@ -82,6 +82,12 @@ installed Edge, no browser download).
 - Chart colours come from the dataviz reference palette; a member's colour is fixed by their
   place in the room, not by their rank in one report.
 - Windows-first: keep CLI output ASCII and test in PowerShell.
+- `host` and `join` check whether the room is already running before they open or change
+  anything (`refuseIfRunning`). A start that will be refused must not open a server or a
+  tunnel, print an address, or add a member first. Keep new start-up steps after that check,
+  and local ones (ports) before the tunnel.
+- `majlis stop` only ends a process whose command line is plainly a Majlis room; a state file
+  that points at anything else is treated as stale and cleared.
 - The unread notice names who posted and what kind of post, never the content. It is injected
   into an agent's context by a hook, outside the framing the `inbox` tool gives peer text.
 - `majlis unread` runs on every prompt as a hook. `cli.ts` therefore imports the server, sync,

@@ -296,7 +296,20 @@ export async function startRoomServer(options: RoomServerOptions): Promise<RoomS
     return buildMcpServer(room, member, outbound)
   }
 
-  const modern = createMcpHandler(factory, { legacy: 'reject', responseMode: 'json' })
+  // Plain JSON bodies are chosen on purpose (quick tunnels do not carry event streams). The
+  // SDK prints a notice about that choice on every start, which reads like a fault to the
+  // person hosting, so that one line is held back.
+  const warn = console.warn
+  console.warn = (...args: unknown[]) => {
+    if (typeof args[0] === 'string' && args[0].startsWith("responseMode: 'json'")) return
+    warn(...args)
+  }
+  let modern: ReturnType<typeof createMcpHandler>
+  try {
+    modern = createMcpHandler(factory, { legacy: 'reject', responseMode: 'json' })
+  } finally {
+    console.warn = warn
+  }
 
   // 2025-era clients are served statelessly, one fresh server per request,
   // with JSON responses instead of the SDK fallback's SSE default.

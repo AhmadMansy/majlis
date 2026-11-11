@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, userInfo } from 'node:os'
 import { join } from 'node:path'
@@ -34,6 +35,7 @@ const USAGE = `majlis ${VERSION} - a shared room where coding agents talk
   majlis join    --room <local name>            (start an existing copy again)
   majlis invite  <name> [--room <name>] [--rotate]
   majlis promote [--room <local name>]
+  majlis stop    [--room <name>]
   majlis unread  [--room <name>] [--hook SessionStart|UserPromptSubmit|PostToolUse]
   majlis hooks   [--room <name>] [--live] [--write]
   majlis video   <report link or number> [--out report.webm] [--room <name>]
@@ -45,6 +47,7 @@ join     Keep a copy of someone else's room on this machine. Your agent talks to
          which works while the host is offline and sends your posts when it is back.
 invite   Create a token for someone (or --rotate an existing member's token).
 promote  Turn your copy into the room itself, when the original host is gone for good.
+stop     Stop a room or copy that is running on this machine, for when its window is gone.
 unread   Say whether the room has posts your agent has not read.
 hooks    Show (or --write into this project) the Claude Code settings that make your agent
          notice unread posts by itself. --live also checks after every tool call.
@@ -105,6 +108,22 @@ function running(dir: string): RunState | undefined {
   }
 }
 
+/**
+ * Stops a start that would collide with a room this machine is already
+ * serving. Called before anything is opened or changed, so a refused start
+ * leaves no half-open server, no tunnel and no new members behind.
+ */
+function refuseIfRunning(dir: string, room: string): void {
+  const state = running(dir)
+  if (!state) return
+  const named = room === 'default' ? '' : ` --room ${room}`
+  throw new Error(
+    `Room "${room}" is already running on this machine (process ${state.pid}, port ${state.port}).\n` +
+      `Stop it with Ctrl+C in its window, or with \`majlis stop${named}\`, then start it again.\n` +
+      'To run a second, separate room at the same time, give it its own name with --room <name>.',
+  )
+}
+
 /** Refuses to start a second process on a room folder that another one is already serving. */
 function claim(dir: string, state: RunState): string {
   const previous = running(dir)
@@ -128,7 +147,7 @@ async function host(argv: string[]): Promise<void> {
     args: argv,
     options: {
       room: { type: 'string', default: 'default' },
-      name: { type: 'string', default: userInfo().username },
+      name: { type: 'string' },
       port: { type: 'string' },
       'panel-port': { type: 'string' },
       'no-tunnel': { type: 'boolean', default: false },
@@ -139,6 +158,8 @@ async function host(argv: string[]): Promise<void> {
   })
   const roomPort = port(values.port, 8787)
   const mode = approval(values.approval)
+  const dir = dataDir(values.room)
+  refuseIfRunning(dir, values.room)
   const { startAdminServer } = await import('./admin.ts')
   const { hostOutbound } = await import('./outbound.ts')
   const { Room } = await import('./room.ts')
@@ -146,7 +167,6 @@ async function host(argv: string[]): Promise<void> {
   const { normalizeHostUrl } = await import('./sync.ts')
   const { startQuickTunnel, waitUntilReachable } = await import('./tunnel.ts')
 
-  const dir = dataDir(values.room)
   mkdirSync(dir, { recursive: true })
   const store = new RoomStore(join(dir, 'room.db'))
   if (store.kind() === 'mirror') {
@@ -159,13 +179,16 @@ async function host(argv: string[]): Promise<void> {
   if (mode) store.updateLocalSettings({ approval: mode })
 
   const issued: Array<{ name: string; token: string; local: boolean }> = []
-  if (!store.hostMember()) {
-    if (store.nameTaken(values.name)) throw new Error(`The name "${values.name}" is already used.`)
-    issued.push({
-      name: values.name,
-      token: store.addMember(values.name, 'host').token,
-      local: true,
-    })
+  const existingHost = store.hostMember()
+  if (!existingHost) {
+    const name = values.name ?? userInfo().username
+    if (store.nameTaken(name)) throw new Error(`The name "${name}" is already used.`)
+    issued.push({ name, token: store.addMember(name, 'host').token, local: true })
+  } else if (values.name && values.name !== existingHost.name) {
+    console.log(
+      `Room "${values.room}" already exists and its host is ${existingHost.name}, so --name ${values.name} is ignored. ` +
+        'For a new room, give it its own name with --room <name>.',
+    )
   }
   for (const name of values.invite) {
     if (store.nameTaken(name)) {
@@ -186,6 +209,15 @@ async function host(argv: string[]): Promise<void> {
     serveCopies: true,
   }).catch((error: unknown) => explainListen(error, '--port', roomPort))
   const localUrl = `http://127.0.0.1:${server.port}`
+  // Both local servers start before the tunnel: a port that is taken should stop the start
+  // while there is still nothing public to take down.
+  const panelPort = port(values['panel-port'], server.port + 1)
+  const admin = await startAdminServer({ room, port: panelPort, outbound }).catch(
+    async (error: unknown) => {
+      await server.close()
+      return explainListen(error, '--panel-port', panelPort)
+    },
+  )
   console.log(`Room "${values.room}" is open at ${localUrl}/mcp  (data: ${dir})`)
 
   let tunnel: Tunnel | undefined
@@ -229,10 +261,6 @@ async function host(argv: string[]): Promise<void> {
       console.log(connectHelp(name, local ? localUrl : (publicUrl ?? localUrl), token, !local))
     }
   }
-  const panelPort = port(values['panel-port'], server.port + 1)
-  const admin = await startAdminServer({ room, port: panelPort, outbound }).catch(
-    (error: unknown) => explainListen(error, '--panel-port', panelPort),
-  )
   console.log(APPROVAL[store.localSettings().approval])
   console.log(`Control panel (this machine only, do not share this link):\n  ${admin.url}\n`)
   console.log('Press Ctrl+C to close the room.')
@@ -283,6 +311,7 @@ async function joinCommand(argv: string[]): Promise<void> {
     local = (await probe(normalizeHostUrl(address), values.token)).room
   }
   const dir = dataDir(local)
+  refuseIfRunning(dir, local)
   mkdirSync(dir, { recursive: true })
   const store = new RoomStore(join(dir, 'room.db'))
 
@@ -434,6 +463,64 @@ function promote(argv: string[]): void {
   }
 }
 
+/** The command line of another process, or an empty string when it cannot be read. */
+function commandLine(pid: number): string {
+  try {
+    const [program, args] =
+      process.platform === 'win32'
+        ? [
+            'powershell.exe',
+            [
+              '-NoProfile',
+              '-Command',
+              `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`,
+            ],
+          ]
+        : ['ps', ['-p', String(pid), '-o', 'args=']]
+    return execFileSync(program, args, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+  } catch {
+    return ''
+  }
+}
+
+function stop(argv: string[]): void {
+  const { values } = parseArgs({ args: argv, options: { room: { type: 'string' } } })
+  const room = pickRoom(values.room)
+  const dir = dataDir(room)
+  const state = running(dir)
+  if (!state) {
+    console.log(`Room "${room}" is not running on this machine.`)
+    return
+  }
+  // A process number can be reused after a crash. Only a process that is plainly a Majlis
+  // room is ever stopped; anything else means the record is stale.
+  const command = commandLine(state.pid)
+  if (command === '') {
+    throw new Error(
+      `Could not check process ${state.pid}, so it was left alone. If it is the room, end it yourself and start again.`,
+    )
+  }
+  if (!/majlis|cli\.[jt]s/.test(command) || !/\s(host|join)(\s|$)/.test(command)) {
+    rmSync(join(dir, 'state.json'), { force: true })
+    console.log(
+      `Room "${room}" was recorded as running in process ${state.pid}, which is something else now. ` +
+        'The record is cleared; you can start the room.',
+    )
+    return
+  }
+  if (process.platform === 'win32') {
+    // The tunnel is a child process, which ending the room alone would leave running.
+    execFileSync('taskkill', ['/pid', String(state.pid), '/T', '/F'], { stdio: 'ignore' })
+  } else {
+    process.kill(state.pid, 'SIGINT')
+  }
+  rmSync(join(dir, 'state.json'), { force: true })
+  console.log(`Stopped room "${room}" (process ${state.pid}).`)
+}
+
 /** The room a command means when none is named: the only one on this machine, else "default". */
 function pickRoom(explicit: string | undefined): string {
   if (explicit) return explicit
@@ -537,6 +624,7 @@ async function main(): Promise<void> {
   else if (command === 'join') await joinCommand(rest)
   else if (command === 'invite') invite(rest)
   else if (command === 'promote') promote(rest)
+  else if (command === 'stop') stop(rest)
   else if (command === 'unread') unread(rest)
   else if (command === 'hooks') hooks(rest)
   else if (command === 'video') await video(rest)

@@ -5,7 +5,7 @@
  * second "machine" through the public address, and let the two agents work.
  * Run `pnpm release:pack` first. Needs network access.
  */
-import { type ChildProcess, execFileSync, execSync, spawn } from 'node:child_process'
+import { type ChildProcess, execFileSync, execSync, spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -65,6 +65,13 @@ function run(cli: string, home: string, args: string[]): string {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   }).trim()
+}
+
+/** Runs a command that is expected to be refused, and returns what it printed. */
+function refused(cli: string, home: string, args: string[]): string {
+  const result = spawnSync(process.execPath, [cli, ...args], { env: env(home), encoding: 'utf8' })
+  if (result.status === 0) throw new Error(`majlis ${args[0]} was expected to be refused.`)
+  return `${result.stdout}${result.stderr}`.trim()
 }
 
 function stop(child: ChildProcess): void {
@@ -156,6 +163,16 @@ try {
   if (!publicUrl || !ahmedToken || !omarJoin?.[1] || !omarJoin[2])
     throw new Error('Cannot continue.')
 
+  // Starting the same room a second time must stop before it opens or changes anything.
+  const second = refused(cli, 'a', ['host', '--invite', 'Zed', '--port', String(port())])
+  check(
+    'a second start of a running room is refused before anything is opened',
+    second.includes('already running on this machine') &&
+      second.includes('majlis stop') &&
+      !second.includes('Cloudflare'),
+    second.split('\n')[0],
+  )
+
   // ── The member: a second machine, keeping a copy ───────────────────
   const copyPort = port()
   const copyOut = await start(
@@ -204,7 +221,22 @@ try {
   const reply = await call(ahmed, 'wait_for_reply', { timeout_seconds: 30 })
   check("the host's agent receives the member's answer", reply.includes('onResume loses the state'))
 
+  check('the refused start added no member', !(await call(ahmed, 'room_status')).includes('Zed'))
+
   await Promise.all([ahmed.close(), omar.close()])
+
+  // ── Stopping a room whose window is gone ───────────────────────────
+  check('stop ends the running room', run(cli, 'a', ['stop']).includes('Stopped room "default"'))
+  const gone = await until(async () => {
+    try {
+      await fetch(`http://127.0.0.1:${hostPort}/health`, { signal: AbortSignal.timeout(1500) })
+      return false
+    } catch {
+      return true
+    }
+  }, 10_000)
+  check('the stopped room no longer answers', gone)
+  check('stop says so when nothing is running', run(cli, 'a', ['stop']).includes('is not running'))
 } finally {
   for (const child of children) stop(child)
   await new Promise((resolve) => setTimeout(resolve, 1500))
