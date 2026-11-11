@@ -103,6 +103,10 @@ installed Edge, no browser download).
 - `pnpm e2e:install` — install that file into an empty folder and run two users through it:
   cloudflared download, tunnel, a copy, contracts, the unread hook (needs network)
 - `pnpm sample:report` — write sample reports to `samples/`
+- `pnpm readme:images` — regenerate `docs/images/` (screenshots from a real room running the
+  sample debate in `scripts/sample-data.ts`, and the comparison picture drawn from the table in
+  `docs/comparison.html`) and the text table in the README. Run it after changing the panel,
+  the report or the comparison. Pass `app` or `comparison` to do one half.
 - `node scripts/shot.ts <url-or-file> <out-prefix> [width] [light|dark]` — screenshots
 - `pnpm typecheck`, `pnpm lint`, `pnpm format`
 - `node src/cli.ts host --name <you> --invite <name>` — run a room

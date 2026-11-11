@@ -383,7 +383,7 @@ function DebateDetail({
           <ul className="plain">
             {view.proposals.map((proposal) => (
               <li key={proposal.seq}>
-                <b>{proposal.member}</b>: <span dir="auto">{proposal.resolution}</span>
+                <b>{proposal.member}:</b> <span dir="auto">{proposal.resolution}</span>
                 <br />
                 <span className="muted">
                   {proposal.responses.length === 0

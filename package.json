@@ -48,7 +48,8 @@
     "e2e:tunnel": "node scripts/e2e-tunnel.ts",
     "e2e:ui": "node scripts/e2e-ui.ts",
     "e2e:install": "node scripts/e2e-install.ts",
-    "sample:report": "node scripts/sample-report.ts"
+    "sample:report": "node scripts/sample-report.ts",
+    "readme:images": "node scripts/readme-images.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/node": "2.1.2",
